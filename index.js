@@ -210,6 +210,39 @@ app.get("/tickets", async (req, res) => {
   }
 });
 
+// ticket details route
+app.get("/tickets/:id", async (req, res) => {
+  try {
+    const { ticketsCollection } = await getCollections();
+
+    const { id } = req.params;
+
+    const ticket = await ticketsCollection.findOne({
+      _id: new ObjectId(id),
+      approved: true,
+    });
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      ticket,
+    });
+  } catch (error) {
+    console.error("GET /tickets/:id error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch ticket",
+    });
+  }
+});
+
 /* ====================================================================
    ==================================================================== */
 
