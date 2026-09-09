@@ -95,10 +95,118 @@ app.get("/", (req, res) => {
 app.get("/tickets", async (req, res) => {
   try {
     const { ticketsCollection } = await getCollections();
-    const result = await ticketsCollection.find().toArray();
-    res.send(result);
+
+    const {
+      from = "",
+      to = "",
+      type = "",
+      sort = "default",
+      page = "1",
+      limit = "6",
+    } = req.query;
+
+    const currentPage = Math.max(Number(page) || 1, 1);
+    const itemsPerPage = Math.min(
+      Math.max(Number(limit) || 6, 1),
+      20
+    );
+
+    // -----------------------------
+    // FILTER
+    // -----------------------------
+
+    const query = {
+      approved: true,
+    };
+
+    if (from.trim()) {
+      query.from = {
+        $regex: from.trim(),
+        $options: "i",
+      };
+    }
+
+    if (to.trim()) {
+      query.to = {
+        $regex: to.trim(),
+        $options: "i",
+      };
+    }
+
+    if (type.trim()) {
+      query.type = type.trim();
+    }
+
+    // -----------------------------
+    // SORT
+    // -----------------------------
+
+    let sortOption = {};
+
+    if (sort === "low") {
+      sortOption = { price: 1 };
+    }
+
+    if (sort === "high") {
+      sortOption = { price: -1 };
+    }
+
+    // -----------------------------
+    // TOTAL COUNT
+    // -----------------------------
+
+    const totalItems = await ticketsCollection.countDocuments(query);
+
+    const totalPages = Math.max(
+      Math.ceil(totalItems / itemsPerPage),
+      1
+    );
+
+    const safePage = Math.min(
+      currentPage,
+      totalPages
+    );
+
+    const skip = (safePage - 1) * itemsPerPage;
+
+    // -----------------------------
+    // GET TICKETS
+    // -----------------------------
+
+    const tickets = await ticketsCollection
+      .find(query)
+      .sort(sortOption)
+      .skip(skip)
+      .limit(itemsPerPage)
+      .toArray();
+
+    // -----------------------------
+    // RESPONSE
+    // -----------------------------
+
+    res.status(200).json({
+      success: true,
+      tickets,
+      pagination: {
+        totalItems,
+        totalPages,
+        currentPage: safePage,
+        itemsPerPage,
+      },
+      filters: {
+        from,
+        to,
+        type,
+        sort,
+      },
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error("GET /tickets error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch tickets",
+    });
   }
 });
 
