@@ -73,9 +73,9 @@ async function getCollections() {
 
   return {
     ticketsCollection: database.collection("tickets"),
-    // usersCollection: database.collection("users"),
-    // bookingsCollection: database.collection("bookings"),
-    // paymentsCollection: database.collection("payments"),
+    usersCollection: database.collection("users"),
+    bookingsCollection: database.collection("bookings"),
+    paymentsCollection: database.collection("payments"),
   };
 }
 
@@ -106,19 +106,17 @@ app.get("/tickets", async (req, res) => {
     } = req.query;
 
     const currentPage = Math.max(Number(page) || 1, 1);
+
     const itemsPerPage = Math.min(
       Math.max(Number(limit) || 6, 1),
       20
     );
 
-    // -----------------------------
-    // FILTER
-    // -----------------------------
-
     const query = {
       approved: true,
     };
 
+    // Search by departure city
     if (from.trim()) {
       query.from = {
         $regex: from.trim(),
@@ -126,6 +124,7 @@ app.get("/tickets", async (req, res) => {
       };
     }
 
+    // Search by destination city
     if (to.trim()) {
       query.to = {
         $regex: to.trim(),
@@ -133,28 +132,21 @@ app.get("/tickets", async (req, res) => {
       };
     }
 
+    // Transport type filter
     if (type.trim()) {
       query.type = type.trim();
     }
 
-    // -----------------------------
-    // SORT
-    // -----------------------------
-
+    // Sorting
     let sortOption = {};
 
     if (sort === "low") {
       sortOption = { price: 1 };
-    }
-
-    if (sort === "high") {
+    } else if (sort === "high") {
       sortOption = { price: -1 };
     }
 
-    // -----------------------------
-    // TOTAL COUNT
-    // -----------------------------
-
+    // Total matching tickets
     const totalItems = await ticketsCollection.countDocuments(query);
 
     const totalPages = Math.max(
@@ -162,6 +154,7 @@ app.get("/tickets", async (req, res) => {
       1
     );
 
+    // Prevent invalid page
     const safePage = Math.min(
       currentPage,
       totalPages
@@ -169,20 +162,12 @@ app.get("/tickets", async (req, res) => {
 
     const skip = (safePage - 1) * itemsPerPage;
 
-    // -----------------------------
-    // GET TICKETS
-    // -----------------------------
-
     const tickets = await ticketsCollection
       .find(query)
       .sort(sortOption)
       .skip(skip)
       .limit(itemsPerPage)
       .toArray();
-
-    // -----------------------------
-    // RESPONSE
-    // -----------------------------
 
     res.status(200).json({
       success: true,
@@ -192,12 +177,6 @@ app.get("/tickets", async (req, res) => {
         totalPages,
         currentPage: safePage,
         itemsPerPage,
-      },
-      filters: {
-        from,
-        to,
-        type,
-        sort,
       },
     });
   } catch (error) {
@@ -216,6 +195,13 @@ app.get("/tickets/:id", async (req, res) => {
     const { ticketsCollection } = await getCollections();
 
     const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket ID",
+      });
+    }
 
     const ticket = await ticketsCollection.findOne({
       _id: new ObjectId(id),
@@ -243,6 +229,99 @@ app.get("/tickets/:id", async (req, res) => {
   }
 });
 
+
+// add ticket route
+app.post("/tickets", async (req, res) => {
+  try {
+    const { ticketsCollection } = await getCollections();
+
+    const {
+      title,
+      operator,
+      from,
+      to,
+      type,
+      price,
+      quantity,
+      departure,
+      date,
+      departureDateTime,
+      image,
+      perks,
+      description,
+      vendorEmail,
+    } = req.body;
+
+    if (
+      !title ||
+      !operator ||
+      !from ||
+      !to ||
+      !type ||
+      price === undefined ||
+      quantity === undefined ||
+      !departure ||
+      !date ||
+      !departureDateTime ||
+      !image ||
+      !description ||
+      !vendorEmail
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Required ticket information is missing",
+      });
+    }
+
+    const newTicket = {
+      title: title.trim(),
+      operator: operator.trim(),
+      from: from.trim(),
+      to: to.trim(),
+      type: type.trim(),
+
+      price: Number(price),
+      quantity: Number(quantity),
+
+      departure: departure.trim(),
+      date: date.trim(),
+      departureDateTime,
+
+      image: image.trim(),
+
+      perks: Array.isArray(perks) ? perks : [],
+
+      description: description.trim(),
+
+      vendorEmail: vendorEmail.trim(),
+
+      // Vendor cannot approve their own ticket
+      approved: false,
+
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const result = await ticketsCollection.insertOne(newTicket);
+
+    res.status(201).json({
+      success: true,
+      message: "Ticket added successfully",
+      ticketId: result.insertedId,
+      ticket: {
+        ...newTicket,
+        _id: result.insertedId,
+      },
+    });
+  } catch (error) {
+    console.error("POST /tickets error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to add ticket",
+    });
+  }
+});
 /* ====================================================================
    ==================================================================== */
 
