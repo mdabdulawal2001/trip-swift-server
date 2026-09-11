@@ -189,6 +189,41 @@ app.get("/tickets", async (req, res) => {
   }
 });
 
+// get vendor tickets route
+app.get("/tickets/vendor", async (req, res) => {
+  try {
+    const { ticketsCollection } = await getCollections();
+
+    const { email = "" } = req.query;
+
+    if (!email.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Vendor email is required",
+      });
+    }
+
+    const tickets = await ticketsCollection
+      .find({
+        vendorEmail: email.trim(),
+      })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.status(200).json({
+      success: true,
+      tickets,
+    });
+  } catch (error) {
+    console.error("GET /tickets/vendor error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch vendor tickets",
+    });
+  }
+});
+
 // ticket details route
 app.get("/tickets/:id", async (req, res) => {
   try {
