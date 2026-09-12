@@ -24,7 +24,7 @@ app.use(
   cors({
     origin: true,
     credentials: true,
-  })
+  }),
 );
 
 app.use(express.json());
@@ -67,7 +67,6 @@ async function connectDB() {
   return dbConnectionPromise;
 }
 
-
 // DATABASE COLLECTIONS FOR TICKET BOOKING SYSTEM
 async function getCollections() {
   const database = await connectDB();
@@ -96,7 +95,7 @@ app.get("/", (req, res) => {
 app.get("/tickets", async (req, res) => {
   try {
     const { ticketsCollection } = await getCollections();
-    
+
     const {
       from = "",
       to = "",
@@ -108,13 +107,10 @@ app.get("/tickets", async (req, res) => {
 
     const currentPage = Math.max(Number(page) || 1, 1);
 
-    const itemsPerPage = Math.min(
-      Math.max(Number(limit) || 6, 1),
-      20
-    );
+    const itemsPerPage = Math.min(Math.max(Number(limit) || 6, 1), 20);
 
     const query = {
-      status: "approved"
+      status: "approved",
     };
 
     // Search by departure city
@@ -150,16 +146,10 @@ app.get("/tickets", async (req, res) => {
     // Total matching tickets
     const totalItems = await ticketsCollection.countDocuments(query);
 
-    const totalPages = Math.max(
-      Math.ceil(totalItems / itemsPerPage),
-      1
-    );
+    const totalPages = Math.max(Math.ceil(totalItems / itemsPerPage), 1);
 
     // Prevent invalid page
-    const safePage = Math.min(
-      currentPage,
-      totalPages
-    );
+    const safePage = Math.min(currentPage, totalPages);
 
     const skip = (safePage - 1) * itemsPerPage;
 
@@ -249,6 +239,53 @@ app.get("/tickets/admin", async (req, res) => {
   }
 });
 
+// get vendor tickets by id route
+app.get("/tickets/vendor/:id", async (req, res) => {
+  try {
+    const { ticketsCollection } = await getCollections();
+
+    const { id } = req.params;
+    const { email = "" } = req.query;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket ID",
+      });
+    }
+
+    if (!email.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Vendor email is required",
+      });
+    }
+
+    const ticket = await ticketsCollection.findOne({
+      _id: new ObjectId(id),
+      vendorEmail: email.trim(),
+    });
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      ticket,
+    });
+  } catch (error) {
+    console.error("GET /tickets/vendor/:id error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch vendor ticket",
+    });
+  }
+});
 
 // ticket details route
 app.get("/tickets/:id", async (req, res) => {
@@ -324,7 +361,7 @@ app.patch("/tickets/:id/status", async (req, res) => {
           status,
           updatedAt: new Date(),
         },
-      }
+      },
     );
 
     if (result.matchedCount === 0) {
@@ -352,7 +389,6 @@ app.patch("/tickets/:id/status", async (req, res) => {
     });
   }
 });
-
 
 // add ticket route
 app.post("/tickets", async (req, res) => {
@@ -511,6 +547,10 @@ app.patch("/tickets/:id", async (req, res) => {
       image: image.trim(),
       perks: Array.isArray(perks) ? perks : [],
       description: description.trim(),
+
+      // Edited ticket needs admin approval again
+      status: "pending",
+
       updatedAt: new Date(),
     };
 
@@ -520,7 +560,7 @@ app.patch("/tickets/:id", async (req, res) => {
       },
       {
         $set: updateData,
-      }
+      },
     );
 
     if (result.matchedCount === 0) {
