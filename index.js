@@ -265,6 +265,69 @@ app.get("/tickets/:id", async (req, res) => {
   }
 });
 
+// manage status route
+
+app.patch("/tickets/:id/status", async (req, res) => {
+  try {
+    const { ticketsCollection } = await getCollections();
+
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket ID",
+      });
+    }
+
+    const allowedStatuses = ["pending", "approved", "rejected"];
+
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket status",
+      });
+    }
+
+    const result = await ticketsCollection.updateOne(
+      {
+        _id: new ObjectId(id),
+      },
+      {
+        $set: {
+          status,
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found",
+      });
+    }
+
+    const updatedTicket = await ticketsCollection.findOne({
+      _id: new ObjectId(id),
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Ticket ${status} successfully`,
+      ticket: updatedTicket,
+    });
+  } catch (error) {
+    console.error("PATCH /tickets/:id/status error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to update ticket status",
+    });
+  }
+});
+
 
 // add ticket route
 app.post("/tickets", async (req, res) => {
