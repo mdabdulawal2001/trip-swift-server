@@ -328,6 +328,30 @@ app.patch("/tickets/:id/status", async (req, res) => {
   }
 });
 
+// admin route to get all tickets
+app.get("/tickets/admin", async (req, res) => {
+  try {
+    const { ticketsCollection } = await getCollections();
+
+    const tickets = await ticketsCollection
+      .find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.status(200).json({
+      success: true,
+      tickets,
+    });
+  } catch (error) {
+    console.error("GET /tickets/admin error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch admin tickets",
+    });
+  }
+});
+
 
 // add ticket route
 app.post("/tickets", async (req, res) => {
