@@ -135,12 +135,15 @@ app.get("/tickets", async (req, res) => {
     }
 
     // Sorting
-    let sortOption = {};
+    let sortOption = {
+      createdAt: -1,
+      _id: -1,
+    };
 
     if (sort === "low") {
-      sortOption = { price: 1 };
+      sortOption = { price: 1, _id: 1 };
     } else if (sort === "high") {
-      sortOption = { price: -1 };
+      sortOption = { price: -1, _id: -1 };
     }
 
     // Total matching tickets
@@ -484,6 +487,7 @@ app.post("/tickets", async (req, res) => {
   }
 });
 
+
 // edit ticket route
 app.patch("/tickets/:id", async (req, res) => {
   try {
@@ -626,6 +630,346 @@ app.delete("/tickets/:id", async (req, res) => {
     });
   }
 });
+
+// bookings route for vendors to get their bookings
+app.get("/bookings/vendor", async (req, res) => {
+  try {
+    const { email = "" } = req.query;
+
+    if (!email.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Vendor email is required",
+      });
+    }
+
+    const { bookingsCollection } =
+      await getCollections();
+
+    const bookings = await bookingsCollection
+      .find({
+        vendorEmail: email.trim(),
+      })
+      .sort({
+        createdAt: -1,
+        _id: -1,
+      })
+      .toArray();
+
+    res.status(200).json({
+      success: true,
+      bookings,
+    });
+  } catch (error) {
+    console.error(
+      "GET /bookings/vendor error:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch vendor bookings",
+    });
+  }
+});
+
+// update booking status route for vendors
+app.patch("/bookings/:id/status", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid booking ID",
+      });
+    }
+
+    const allowedStatuses = [
+      "pending",
+      "accepted",
+      "rejected",
+    ];
+
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid booking status",
+      });
+    }
+
+    const {
+      bookingsCollection,
+    } = await getCollections();
+
+    const booking =
+      await bookingsCollection.findOne({
+        _id: new ObjectId(id),
+      });
+
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    if (booking.status !== "pending") {
+      return res.status(400).json({
+        success: false,
+        message: "Only pending bookings can be updated",
+      });
+    }
+
+    const departureTime = new Date(
+      booking.departureDateTime
+    );
+
+    if (
+      !Number.isNaN(departureTime.getTime()) &&
+      departureTime.getTime() <= Date.now()
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot update a booking after departure",
+      });
+    }
+
+    const updateData = {
+      status,
+      updatedAt: new Date(),
+    };
+
+    // Rejected booking no longer needs payment
+    if (status === "rejected") {
+      updateData.paymentStatus = "not_required";
+    }
+
+    const result =
+      await bookingsCollection.updateOne(
+        {
+          _id: new ObjectId(id),
+        },
+        {
+          $set: updateData,
+        }
+      );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    const updatedBooking =
+      await bookingsCollection.findOne({
+        _id: new ObjectId(id),
+      });
+
+    res.status(200).json({
+      success: true,
+      message: `Booking ${status} successfully`,
+      booking: updatedBooking,
+    });
+  } catch (error) {
+    console.error(
+      "PATCH /bookings/:id/status error:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to update booking status",
+    });
+  }
+});
+
+
+// ============ user routes ============
+
+// bookings route
+app.post("/bookings", async (req, res) => {
+  try {
+    const {
+      ticketId,
+      userName,
+      userEmail,
+      quantity,
+    } = req.body;
+
+    if (
+      !ticketId ||
+      !userName ||
+      !userEmail ||
+      quantity === undefined
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Required booking information is missing",
+      });
+    }
+
+    if (!ObjectId.isValid(ticketId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket ID",
+      });
+    }
+
+    const bookingQuantity = Number(quantity);
+
+    if (
+      !Number.isInteger(bookingQuantity) ||
+      bookingQuantity < 1
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid booking quantity",
+      });
+    }
+
+    const {
+      ticketsCollection,
+      bookingsCollection,
+    } = await getCollections();
+
+    const ticket = await ticketsCollection.findOne({
+      _id: new ObjectId(ticketId),
+      status: "approved",
+    });
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found",
+      });
+    }
+
+    if (ticket.quantity <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Ticket is sold out",
+      });
+    }
+
+    if (bookingQuantity > ticket.quantity) {
+      return res.status(400).json({
+        success: false,
+        message: `Only ${ticket.quantity} tickets are available`,
+      });
+    }
+
+    const departureTime = new Date(
+      ticket.departureDateTime
+    );
+
+    if (
+      Number.isNaN(departureTime.getTime()) ||
+      departureTime.getTime() <= Date.now()
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "This ticket has already departed",
+      });
+    }
+
+    const totalPrice =
+      Number(ticket.price) * bookingQuantity;
+
+    const newBooking = {
+      ticketId: ticket._id,
+
+      userName: userName.trim(),
+      userEmail: userEmail.trim(),
+
+      vendorEmail: ticket.vendorEmail,
+
+      ticketTitle: ticket.title,
+      operator: ticket.operator,
+
+      from: ticket.from,
+      to: ticket.to,
+      type: ticket.type,
+
+      price: Number(ticket.price),
+      quantity: bookingQuantity,
+      totalPrice,
+
+      departure: ticket.departure,
+      date: ticket.date,
+      departureDateTime: ticket.departureDateTime,
+
+      image: ticket.image,
+
+      status: "pending",
+      paymentStatus: "unpaid",
+
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const result =
+      await bookingsCollection.insertOne(newBooking);
+
+    res.status(201).json({
+      success: true,
+      message: "Booking request created successfully",
+      booking: {
+        ...newBooking,
+        _id: result.insertedId,
+      },
+    });
+  } catch (error) {
+    console.error("POST /bookings error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to create booking",
+    });
+  }
+});
+
+app.get("/bookings/user", async (req, res) => {
+  try {
+    const { email = "" } = req.query;
+
+    if (!email.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "User email is required",
+      });
+    }
+
+    const { bookingsCollection } =
+      await getCollections();
+
+    const bookings = await bookingsCollection
+      .find({
+        userEmail: email.trim(),
+      })
+      .sort({
+        createdAt: -1,
+        _id: -1,
+      })
+      .toArray();
+
+    res.status(200).json({
+      success: true,
+      bookings,
+    });
+  } catch (error) {
+    console.error("GET /bookings/user error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch user bookings",
+    });
+  }
+});
+
+
 /* ====================================================================
    ==================================================================== */
 
