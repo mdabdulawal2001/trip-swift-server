@@ -548,6 +548,44 @@ app.patch("/tickets/:id", async (req, res) => {
     });
   }
 });
+
+// delete ticket route
+app.delete("/tickets/:id", async (req, res) => {
+  try {
+    const { ticketsCollection } = await getCollections();
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket ID",
+      });
+    }
+
+    const result = await ticketsCollection.deleteOne({
+      _id: new ObjectId(id),
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Ticket deleted successfully",
+    });
+  } catch (error) {
+    console.error("DELETE /tickets/:id error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete ticket",
+    });
+  }
+});
 /* ====================================================================
    ==================================================================== */
 
