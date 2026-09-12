@@ -225,6 +225,31 @@ app.get("/tickets/vendor", async (req, res) => {
   }
 });
 
+// admin route to get all tickets
+app.get("/tickets/admin", async (req, res) => {
+  try {
+    const { ticketsCollection } = await getCollections();
+
+    const tickets = await ticketsCollection
+      .find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.status(200).json({
+      success: true,
+      tickets,
+    });
+  } catch (error) {
+    console.error("GET /tickets/admin error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch admin tickets",
+    });
+  }
+});
+
+
 // ticket details route
 app.get("/tickets/:id", async (req, res) => {
   try {
@@ -328,30 +353,6 @@ app.patch("/tickets/:id/status", async (req, res) => {
   }
 });
 
-// admin route to get all tickets
-app.get("/tickets/admin", async (req, res) => {
-  try {
-    const { ticketsCollection } = await getCollections();
-
-    const tickets = await ticketsCollection
-      .find({})
-      .sort({ createdAt: -1 })
-      .toArray();
-
-    res.status(200).json({
-      success: true,
-      tickets,
-    });
-  } catch (error) {
-    console.error("GET /tickets/admin error:", error);
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch admin tickets",
-    });
-  }
-});
-
 
 // add ticket route
 app.post("/tickets", async (req, res) => {
@@ -443,6 +444,107 @@ app.post("/tickets", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to add ticket",
+    });
+  }
+});
+
+// edit ticket route
+app.patch("/tickets/:id", async (req, res) => {
+  try {
+    const { ticketsCollection } = await getCollections();
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket ID",
+      });
+    }
+
+    const {
+      title,
+      operator,
+      from,
+      to,
+      type,
+      price,
+      quantity,
+      departure,
+      date,
+      departureDateTime,
+      image,
+      perks,
+      description,
+    } = req.body;
+
+    if (
+      !title ||
+      !operator ||
+      !from ||
+      !to ||
+      !type ||
+      price === undefined ||
+      quantity === undefined ||
+      !departure ||
+      !date ||
+      !departureDateTime ||
+      !image ||
+      !description
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Required ticket information is missing",
+      });
+    }
+
+    const updateData = {
+      title: title.trim(),
+      operator: operator.trim(),
+      from: from.trim(),
+      to: to.trim(),
+      type: type.trim(),
+      price: Number(price),
+      quantity: Number(quantity),
+      departure: departure.trim(),
+      date: date.trim(),
+      departureDateTime,
+      image: image.trim(),
+      perks: Array.isArray(perks) ? perks : [],
+      description: description.trim(),
+      updatedAt: new Date(),
+    };
+
+    const result = await ticketsCollection.updateOne(
+      {
+        _id: new ObjectId(id),
+      },
+      {
+        $set: updateData,
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found",
+      });
+    }
+
+    const updatedTicket = await ticketsCollection.findOne({
+      _id: new ObjectId(id),
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Ticket updated successfully",
+      ticket: updatedTicket,
+    });
+  } catch (error) {
+    console.error("PATCH /tickets/:id error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to update ticket",
     });
   }
 });
