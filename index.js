@@ -67,6 +67,7 @@ async function connectDB() {
   return dbConnectionPromise;
 }
 
+
 // DATABASE COLLECTIONS FOR TICKET BOOKING SYSTEM
 async function getCollections() {
   const database = await connectDB();
@@ -95,7 +96,7 @@ app.get("/", (req, res) => {
 app.get("/tickets", async (req, res) => {
   try {
     const { ticketsCollection } = await getCollections();
-
+    
     const {
       from = "",
       to = "",
@@ -113,7 +114,7 @@ app.get("/tickets", async (req, res) => {
     );
 
     const query = {
-      approved: true,
+      status: "approved"
     };
 
     // Search by departure city
@@ -240,7 +241,7 @@ app.get("/tickets/:id", async (req, res) => {
 
     const ticket = await ticketsCollection.findOne({
       _id: new ObjectId(id),
-      approved: true,
+      status: "approved",
     });
 
     if (!ticket) {
@@ -331,7 +332,8 @@ app.post("/tickets", async (req, res) => {
       vendorEmail: vendorEmail.trim(),
 
       // Vendor cannot approve their own ticket
-      approved: false,
+      // approved: false,
+      status: "pending",
 
       createdAt: new Date(),
       updatedAt: new Date(),
