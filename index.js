@@ -266,7 +266,49 @@ app.get("/tickets/vendor/:id", async (req, res) => {
 
     const ticket = await ticketsCollection.findOne({
       _id: new ObjectId(id),
-      vendorEmail: email.trim(),
+      vendorEmail: email.trim().toLowerCase(),
+    });
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: "Vendor ticket not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      ticket,
+    });
+  } catch (error) {
+    console.error(
+      "GET /tickets/vendor/:id error:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch vendor ticket",
+    });
+  }
+});
+
+// get admin tickets by id route
+app.get("/tickets/admin/:id", async (req, res) => {
+  try {
+    const { ticketsCollection } = await getCollections();
+
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket ID",
+      });
+    }
+
+    const ticket = await ticketsCollection.findOne({
+      _id: new ObjectId(id),
     });
 
     if (!ticket) {
@@ -281,11 +323,14 @@ app.get("/tickets/vendor/:id", async (req, res) => {
       ticket,
     });
   } catch (error) {
-    console.error("GET /tickets/vendor/:id error:", error);
+    console.error(
+      "GET /tickets/admin/:id error:",
+      error
+    );
 
     res.status(500).json({
       success: false,
-      message: "Failed to fetch vendor ticket",
+      message: "Failed to fetch ticket",
     });
   }
 });
