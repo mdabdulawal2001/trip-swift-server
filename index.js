@@ -79,6 +79,24 @@ async function getCollections() {
   };
 }
 
+async function getFraudVendorEmails(usersCollection) {
+  const fraudVendors = await usersCollection
+    .find(
+      {
+        role: "vendor",
+        isFraud: true,
+      },
+      {
+        projection: {
+          email: 1,
+        },
+      },
+    )
+    .toArray();
+
+  return fraudVendors.map((user) => user.email?.trim()).filter(Boolean);
+}
+
 // ROOT ROUTE
 app.get("/", (req, res) => {
   res.status(200).json({
@@ -94,7 +112,9 @@ app.get("/", (req, res) => {
 // Example Route: Get All Tickets
 app.get("/tickets", async (req, res) => {
   try {
-    const { ticketsCollection } = await getCollections();
+    const { ticketsCollection, usersCollection } = await getCollections();
+
+    const fraudVendorEmails = await getFraudVendorEmails(usersCollection);
 
     const {
       from = "",
@@ -111,6 +131,9 @@ app.get("/tickets", async (req, res) => {
 
     const query = {
       status: "approved",
+      vendorEmail: {
+        $nin: fraudVendorEmails,
+      },
     };
 
     // Search by departure city
@@ -281,10 +304,7 @@ app.get("/tickets/vendor/:id", async (req, res) => {
       ticket,
     });
   } catch (error) {
-    console.error(
-      "GET /tickets/vendor/:id error:",
-      error
-    );
+    console.error("GET /tickets/vendor/:id error:", error);
 
     res.status(500).json({
       success: false,
@@ -323,10 +343,7 @@ app.get("/tickets/admin/:id", async (req, res) => {
       ticket,
     });
   } catch (error) {
-    console.error(
-      "GET /tickets/admin/:id error:",
-      error
-    );
+    console.error("GET /tickets/admin/:id error:", error);
 
     res.status(500).json({
       success: false,
@@ -335,10 +352,47 @@ app.get("/tickets/admin/:id", async (req, res) => {
   }
 });
 
+// advertise ticket route
+app.get("/tickets/advertised", async (req, res) => {
+  try {
+    const { ticketsCollection, usersCollection } = await getCollections();
+
+    const fraudVendorEmails = await getFraudVendorEmails(usersCollection);
+
+    const tickets = await ticketsCollection
+      .find({
+        status: "approved",
+        advertised: true,
+        vendorEmail: {
+          $nin: fraudVendorEmails,
+        },
+      })
+      .sort({
+        advertisedAt: -1,
+      })
+      .limit(6)
+      .toArray();
+
+    res.status(200).json({
+      success: true,
+      tickets,
+    });
+  } catch (error) {
+    console.error("Get advertised tickets error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch advertised tickets",
+    });
+  }
+});
+
 // ticket details route
 app.get("/tickets/:id", async (req, res) => {
   try {
-    const { ticketsCollection } = await getCollections();
+    const { ticketsCollection, usersCollection } = await getCollections();
+
+    const fraudVendorEmails = await getFraudVendorEmails(usersCollection);
 
     const { id } = req.params;
 
@@ -352,6 +406,9 @@ app.get("/tickets/:id", async (req, res) => {
     const ticket = await ticketsCollection.findOne({
       _id: new ObjectId(id),
       status: "approved",
+      vendorEmail: {
+        $nin: fraudVendorEmails,
+      },
     });
 
     if (!ticket) {
@@ -407,6 +464,12 @@ app.patch("/tickets/:id/status", async (req, res) => {
       {
         $set: {
           status,
+          ...(status !== "approved"
+            ? {
+                advertised: false,
+                advertisedAt: null,
+              }
+            : {}),
           updatedAt: new Date(),
         },
       },
@@ -441,7 +504,7 @@ app.patch("/tickets/:id/status", async (req, res) => {
 // add ticket route
 app.post("/tickets", async (req, res) => {
   try {
-    const { ticketsCollection } = await getCollections();
+    const { ticketsCollection, usersCollection } = await getCollections();
 
     const {
       title,
@@ -515,6 +578,26 @@ app.post("/tickets", async (req, res) => {
       updatedAt: new Date(),
     };
 
+    const normalizedVendorEmail = vendorEmail?.trim();
+
+    const vendorUser = await usersCollection.findOne({
+      email: normalizedVendorEmail,
+      role: "vendor",
+    });
+
+    if (!vendorUser) {
+      return res.status(403).json({
+        message: "Only vendors can add tickets.",
+      });
+    }
+
+    if (vendorUser.isFraud === true) {
+      return res.status(403).json({
+        message:
+          "Your vendor account has been marked as fraud. You cannot add tickets.",
+      });
+    }
+
     const result = await ticketsCollection.insertOne(newTicket);
 
     res.status(201).json({
@@ -536,11 +619,119 @@ app.post("/tickets", async (req, res) => {
   }
 });
 
+// admin route to advertise a ticket
+app.patch("/tickets/:id/advertise", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { advertised } = req.body;
+    console.log("Advertise request body:", req.body);
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket ID",
+      });
+    }
+
+    if (typeof advertised !== "boolean") {
+      return res.status(400).json({
+        success: false,
+        message: "Advertised value must be boolean",
+      });
+    }
+
+    const { ticketsCollection, usersCollection } = await getCollections();
+
+    const ticket = await ticketsCollection.findOne({
+      _id: new ObjectId(id),
+    });
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found",
+      });
+    }
+
+    const vendorUser = await usersCollection.findOne({
+      email: ticket.vendorEmail?.trim(),
+      role: "vendor",
+    });
+
+    if (vendorUser?.isFraud === true) {
+      return res.status(403).json({
+        message: "Fraud vendor tickets cannot be advertised.",
+      });
+    }
+
+    if (ticket.status !== "approved") {
+      return res.status(400).json({
+        success: false,
+        message: "Only approved tickets can be advertised.",
+      });
+    }
+
+    // Adding advertisement
+    if (advertised) {
+      const advertisedCount = await ticketsCollection.countDocuments({
+        advertised: true,
+      });
+
+      if (advertisedCount >= 6) {
+        return res.status(400).json({
+          success: false,
+          message: "You can advertise a maximum of 6 tickets.",
+        });
+      }
+    }
+
+    const updateData = {
+      advertised,
+      advertisedAt: advertised ? new Date() : null,
+      updatedAt: new Date(),
+    };
+
+    const result = await ticketsCollection.updateOne(
+      {
+        _id: new ObjectId(id),
+      },
+      {
+        $set: updateData,
+      },
+    );
+
+    if (!result.modifiedCount) {
+      return res.status(400).json({
+        success: false,
+        message: "Advertisement status was not changed.",
+      });
+    }
+
+    const updatedTicket = await ticketsCollection.findOne({
+      _id: new ObjectId(id),
+    });
+
+    res.status(200).json({
+      success: true,
+      message: advertised
+        ? "Ticket added to advertisement."
+        : "Ticket removed from advertisement.",
+      ticket: updatedTicket,
+    });
+  } catch (error) {
+    console.error("Advertisement toggle error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to update advertisement.",
+    });
+  }
+});
 
 // edit ticket route
 app.patch("/tickets/:id", async (req, res) => {
   try {
-    const { ticketsCollection } = await getCollections();
+    const { ticketsCollection, usersCollection } = await getCollections();
     const { id } = req.params;
 
     if (!ObjectId.isValid(id)) {
@@ -623,6 +814,17 @@ app.patch("/tickets/:id", async (req, res) => {
       });
     }
 
+    const vendorUser = await usersCollection.findOne({
+      email: ticket.vendorEmail?.trim(),
+      role: "vendor",
+    });
+
+    if (vendorUser?.isFraud === true) {
+      return res.status(403).json({
+        message: "Fraud vendors cannot edit tickets.",
+      });
+    }
+
     const updatedTicket = await ticketsCollection.findOne({
       _id: new ObjectId(id),
     });
@@ -680,159 +882,6 @@ app.delete("/tickets/:id", async (req, res) => {
   }
 });
 
-// advertise ticket route
-app.get("/tickets/advertised", async (req, res) => {
-  try {
-    const { ticketsCollection } =
-      await getCollections();
-
-    const tickets = await ticketsCollection
-      .find({
-        status: "approved",
-        advertised: true,
-      })
-      .sort({
-        advertisedAt: -1,
-      })
-      .limit(6)
-      .toArray();
-
-    res.status(200).json({
-      success: true,
-      tickets,
-    });
-  } catch (error) {
-    console.error(
-      "Get advertised tickets error:",
-      error
-    );
-
-    res.status(500).json({
-      success: false,
-      message:
-        "Failed to fetch advertised tickets",
-    });
-  }
-});
-
-// admin route to advertise a ticket
-app.patch(
-  "/tickets/:id/advertise",
-  async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { advertised } = req.body;
-
-      if (!ObjectId.isValid(id)) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid ticket ID",
-        });
-      }
-
-      if (typeof advertised !== "boolean") {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Advertised value must be boolean",
-        });
-      }
-
-      const {
-        ticketsCollection,
-      } = await getCollections();
-
-      const ticket =
-        await ticketsCollection.findOne({
-          _id: new ObjectId(id),
-        });
-
-      if (!ticket) {
-        return res.status(404).json({
-          success: false,
-          message: "Ticket not found",
-        });
-      }
-
-      if (
-        ticket.status !== "approved"
-      ) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Only approved tickets can be advertised.",
-        });
-      }
-
-      // Adding advertisement
-      if (advertised) {
-        const advertisedCount =
-          await ticketsCollection.countDocuments({
-            advertised: true,
-          });
-
-        if (advertisedCount >= 6) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "You can advertise a maximum of 6 tickets.",
-          });
-        }
-      }
-
-      const updateData = {
-        advertised,
-        advertisedAt: advertised
-          ? new Date()
-          : null,
-        updatedAt: new Date(),
-      };
-
-      const result =
-        await ticketsCollection.updateOne(
-          {
-            _id: new ObjectId(id),
-          },
-          {
-            $set: updateData,
-          }
-        );
-
-      if (!result.modifiedCount) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Advertisement status was not changed.",
-        });
-      }
-
-      const updatedTicket =
-        await ticketsCollection.findOne({
-          _id: new ObjectId(id),
-        });
-
-      res.status(200).json({
-        success: true,
-        message: advertised
-          ? "Ticket added to advertisement."
-          : "Ticket removed from advertisement.",
-        ticket: updatedTicket,
-      });
-    } catch (error) {
-      console.error(
-        "Advertisement toggle error:",
-        error
-      );
-
-      res.status(500).json({
-        success: false,
-        message:
-          "Failed to update advertisement.",
-      });
-    }
-  }
-);
-
 // ================== bookings routes ==================
 // bookings route for vendors to get their bookings
 app.get("/bookings/vendor", async (req, res) => {
@@ -846,8 +895,7 @@ app.get("/bookings/vendor", async (req, res) => {
       });
     }
 
-    const { bookingsCollection } =
-      await getCollections();
+    const { bookingsCollection } = await getCollections();
 
     const bookings = await bookingsCollection
       .find({
@@ -864,10 +912,7 @@ app.get("/bookings/vendor", async (req, res) => {
       bookings,
     });
   } catch (error) {
-    console.error(
-      "GET /bookings/vendor error:",
-      error
-    );
+    console.error("GET /bookings/vendor error:", error);
 
     res.status(500).json({
       success: false,
@@ -889,11 +934,7 @@ app.patch("/bookings/:id/status", async (req, res) => {
       });
     }
 
-    const allowedStatuses = [
-      "pending",
-      "accepted",
-      "rejected",
-    ];
+    const allowedStatuses = ["pending", "accepted", "rejected"];
 
     if (!allowedStatuses.includes(status)) {
       return res.status(400).json({
@@ -902,14 +943,11 @@ app.patch("/bookings/:id/status", async (req, res) => {
       });
     }
 
-    const {
-      bookingsCollection,
-    } = await getCollections();
+    const { bookingsCollection } = await getCollections();
 
-    const booking =
-      await bookingsCollection.findOne({
-        _id: new ObjectId(id),
-      });
+    const booking = await bookingsCollection.findOne({
+      _id: new ObjectId(id),
+    });
 
     if (!booking) {
       return res.status(404).json({
@@ -925,9 +963,7 @@ app.patch("/bookings/:id/status", async (req, res) => {
       });
     }
 
-    const departureTime = new Date(
-      booking.departureDateTime
-    );
+    const departureTime = new Date(booking.departureDateTime);
 
     if (
       !Number.isNaN(departureTime.getTime()) &&
@@ -949,15 +985,14 @@ app.patch("/bookings/:id/status", async (req, res) => {
       updateData.paymentStatus = "not_required";
     }
 
-    const result =
-      await bookingsCollection.updateOne(
-        {
-          _id: new ObjectId(id),
-        },
-        {
-          $set: updateData,
-        }
-      );
+    const result = await bookingsCollection.updateOne(
+      {
+        _id: new ObjectId(id),
+      },
+      {
+        $set: updateData,
+      },
+    );
 
     if (result.matchedCount === 0) {
       return res.status(404).json({
@@ -966,10 +1001,9 @@ app.patch("/bookings/:id/status", async (req, res) => {
       });
     }
 
-    const updatedBooking =
-      await bookingsCollection.findOne({
-        _id: new ObjectId(id),
-      });
+    const updatedBooking = await bookingsCollection.findOne({
+      _id: new ObjectId(id),
+    });
 
     res.status(200).json({
       success: true,
@@ -977,10 +1011,7 @@ app.patch("/bookings/:id/status", async (req, res) => {
       booking: updatedBooking,
     });
   } catch (error) {
-    console.error(
-      "PATCH /bookings/:id/status error:",
-      error
-    );
+    console.error("PATCH /bookings/:id/status error:", error);
 
     res.status(500).json({
       success: false,
@@ -989,25 +1020,14 @@ app.patch("/bookings/:id/status", async (req, res) => {
   }
 });
 
-
 // ============ user routes ============
 
 // bookings route
 app.post("/bookings", async (req, res) => {
   try {
-    const {
-      ticketId,
-      userName,
-      userEmail,
-      quantity,
-    } = req.body;
+    const { ticketId, userName, userEmail, quantity } = req.body;
 
-    if (
-      !ticketId ||
-      !userName ||
-      !userEmail ||
-      quantity === undefined
-    ) {
+    if (!ticketId || !userName || !userEmail || quantity === undefined) {
       return res.status(400).json({
         success: false,
         message: "Required booking information is missing",
@@ -1023,20 +1043,14 @@ app.post("/bookings", async (req, res) => {
 
     const bookingQuantity = Number(quantity);
 
-    if (
-      !Number.isInteger(bookingQuantity) ||
-      bookingQuantity < 1
-    ) {
+    if (!Number.isInteger(bookingQuantity) || bookingQuantity < 1) {
       return res.status(400).json({
         success: false,
         message: "Invalid booking quantity",
       });
     }
 
-    const {
-      ticketsCollection,
-      bookingsCollection,
-    } = await getCollections();
+    const { ticketsCollection, bookingsCollection } = await getCollections();
 
     const ticket = await ticketsCollection.findOne({
       _id: new ObjectId(ticketId),
@@ -1064,9 +1078,7 @@ app.post("/bookings", async (req, res) => {
       });
     }
 
-    const departureTime = new Date(
-      ticket.departureDateTime
-    );
+    const departureTime = new Date(ticket.departureDateTime);
 
     if (
       Number.isNaN(departureTime.getTime()) ||
@@ -1078,8 +1090,7 @@ app.post("/bookings", async (req, res) => {
       });
     }
 
-    const totalPrice =
-      Number(ticket.price) * bookingQuantity;
+    const totalPrice = Number(ticket.price) * bookingQuantity;
 
     const newBooking = {
       ticketId: ticket._id,
@@ -1113,8 +1124,7 @@ app.post("/bookings", async (req, res) => {
       updatedAt: new Date(),
     };
 
-    const result =
-      await bookingsCollection.insertOne(newBooking);
+    const result = await bookingsCollection.insertOne(newBooking);
 
     res.status(201).json({
       success: true,
@@ -1145,8 +1155,7 @@ app.get("/bookings/user", async (req, res) => {
       });
     }
 
-    const { bookingsCollection } =
-      await getCollections();
+    const { bookingsCollection } = await getCollections();
 
     const bookings = await bookingsCollection
       .find({
@@ -1172,16 +1181,12 @@ app.get("/bookings/user", async (req, res) => {
   }
 });
 
-
 // ============ admin dashboard stats ============
 
 app.get("/admin/dashboard-stats", async (req, res) => {
   try {
-    const {
-      ticketsCollection,
-      usersCollection,
-      bookingsCollection,
-    } = await getCollections();
+    const { ticketsCollection, usersCollection, bookingsCollection } =
+      await getCollections();
 
     const [
       totalUsers,
@@ -1252,50 +1257,30 @@ app.get("/admin/dashboard-stats", async (req, res) => {
         .toArray(),
     ]);
 
-    const ticketTotalForPercentage =
-      totalTickets || 1;
+    const ticketTotalForPercentage = totalTickets || 1;
 
     const approvalStats = {
-      approved: Math.round(
-        (approvedTickets /
-          ticketTotalForPercentage) *
-          100
-      ),
+      approved: Math.round((approvedTickets / ticketTotalForPercentage) * 100),
 
-      pending: Math.round(
-        (pendingTickets /
-          ticketTotalForPercentage) *
-          100
-      ),
+      pending: Math.round((pendingTickets / ticketTotalForPercentage) * 100),
 
-      rejected: Math.round(
-        (rejectedTickets /
-          ticketTotalForPercentage) *
-          100
-      ),
+      rejected: Math.round((rejectedTickets / ticketTotalForPercentage) * 100),
     };
 
     const activities = [];
 
     recentUsers.forEach((user) => {
       activities.push({
-        type:
-          user.role === "vendor"
-            ? "vendor"
-            : "user",
+        type: user.role === "vendor" ? "vendor" : "user",
 
         title:
           user.role === "vendor"
             ? "New vendor registered"
             : "New user registered",
 
-        description:
-          user.name ||
-          user.email ||
-          "New account created",
+        description: user.name || user.email || "New account created",
 
-        createdAt:
-          user.createdAt || null,
+        createdAt: user.createdAt || null,
       });
     });
 
@@ -1305,12 +1290,9 @@ app.get("/admin/dashboard-stats", async (req, res) => {
 
         title: "New ticket submitted",
 
-        description: `${ticket.from || "Unknown"} → ${
-          ticket.to || "Unknown"
-        }`,
+        description: `${ticket.from || "Unknown"} → ${ticket.to || "Unknown"}`,
 
-        createdAt:
-          ticket.createdAt || null,
+        createdAt: ticket.createdAt || null,
       });
     });
 
@@ -1322,23 +1304,16 @@ app.get("/admin/dashboard-stats", async (req, res) => {
 
         description:
           booking.ticketTitle ||
-          `${booking.from || "Unknown"} → ${
-            booking.to || "Unknown"
-          }`,
+          `${booking.from || "Unknown"} → ${booking.to || "Unknown"}`,
 
-        createdAt:
-          booking.createdAt || null,
+        createdAt: booking.createdAt || null,
       });
     });
 
     activities.sort((a, b) => {
-      const dateA = new Date(
-        a.createdAt || 0
-      ).getTime();
+      const dateA = new Date(a.createdAt || 0).getTime();
 
-      const dateB = new Date(
-        b.createdAt || 0
-      ).getTime();
+      const dateB = new Date(b.createdAt || 0).getTime();
 
       return dateB - dateA;
     });
@@ -1362,15 +1337,11 @@ app.get("/admin/dashboard-stats", async (req, res) => {
       activities: activities.slice(0, 3),
     });
   } catch (error) {
-    console.error(
-      "GET /admin/dashboard-stats error:",
-      error
-    );
+    console.error("GET /admin/dashboard-stats error:", error);
 
     res.status(500).json({
       success: false,
-      message:
-        "Failed to fetch admin dashboard stats",
+      message: "Failed to fetch admin dashboard stats",
     });
   }
 });
@@ -1407,8 +1378,6 @@ app.get("/user/dashboard-stats", async (req, res) => {
     });
   }
 });
-
-
 
 /* ====================================================================
    ==================================================================== */
