@@ -507,6 +507,10 @@ app.post("/tickets", async (req, res) => {
       // approved: false,
       status: "pending",
 
+      // advertised
+      advertised: false,
+      advertisedAt: null,
+
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -676,6 +680,160 @@ app.delete("/tickets/:id", async (req, res) => {
   }
 });
 
+// advertise ticket route
+app.get("/tickets/advertised", async (req, res) => {
+  try {
+    const { ticketsCollection } =
+      await getCollections();
+
+    const tickets = await ticketsCollection
+      .find({
+        status: "approved",
+        advertised: true,
+      })
+      .sort({
+        advertisedAt: -1,
+      })
+      .limit(6)
+      .toArray();
+
+    res.status(200).json({
+      success: true,
+      tickets,
+    });
+  } catch (error) {
+    console.error(
+      "Get advertised tickets error:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      message:
+        "Failed to fetch advertised tickets",
+    });
+  }
+});
+
+// admin route to advertise a ticket
+app.patch(
+  "/tickets/:id/advertise",
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { advertised } = req.body;
+
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid ticket ID",
+        });
+      }
+
+      if (typeof advertised !== "boolean") {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Advertised value must be boolean",
+        });
+      }
+
+      const {
+        ticketsCollection,
+      } = await getCollections();
+
+      const ticket =
+        await ticketsCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+      if (!ticket) {
+        return res.status(404).json({
+          success: false,
+          message: "Ticket not found",
+        });
+      }
+
+      if (
+        ticket.status !== "approved"
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Only approved tickets can be advertised.",
+        });
+      }
+
+      // Adding advertisement
+      if (advertised) {
+        const advertisedCount =
+          await ticketsCollection.countDocuments({
+            advertised: true,
+          });
+
+        if (advertisedCount >= 6) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "You can advertise a maximum of 6 tickets.",
+          });
+        }
+      }
+
+      const updateData = {
+        advertised,
+        advertisedAt: advertised
+          ? new Date()
+          : null,
+        updatedAt: new Date(),
+      };
+
+      const result =
+        await ticketsCollection.updateOne(
+          {
+            _id: new ObjectId(id),
+          },
+          {
+            $set: updateData,
+          }
+        );
+
+      if (!result.modifiedCount) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Advertisement status was not changed.",
+        });
+      }
+
+      const updatedTicket =
+        await ticketsCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+      res.status(200).json({
+        success: true,
+        message: advertised
+          ? "Ticket added to advertisement."
+          : "Ticket removed from advertisement.",
+        ticket: updatedTicket,
+      });
+    } catch (error) {
+      console.error(
+        "Advertisement toggle error:",
+        error
+      );
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Failed to update advertisement.",
+      });
+    }
+  }
+);
+
+// ================== bookings routes ==================
 // bookings route for vendors to get their bookings
 app.get("/bookings/vendor", async (req, res) => {
   try {
@@ -1249,6 +1407,8 @@ app.get("/user/dashboard-stats", async (req, res) => {
     });
   }
 });
+
+
 
 /* ====================================================================
    ==================================================================== */
