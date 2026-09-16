@@ -94,7 +94,11 @@ async function getFraudVendorEmails(usersCollection) {
     )
     .toArray();
 
-  return fraudVendors.map((user) => user.email?.trim()).filter(Boolean);
+  return fraudVendors.map((user) => normalizeEmail(user.email)).filter(Boolean);
+}
+
+function normalizeEmail(email) {
+  return String(email || "").trim().toLowerCase();
 }
 
 // ROOT ROUTE
@@ -222,7 +226,7 @@ app.get("/tickets/vendor", async (req, res) => {
 
     const tickets = await ticketsCollection
       .find({
-        vendorEmail: email.trim(),
+        vendorEmail: normalizeEmail(email),
       })
       .sort({ createdAt: -1 })
       .toArray();
@@ -289,7 +293,7 @@ app.get("/tickets/vendor/:id", async (req, res) => {
 
     const ticket = await ticketsCollection.findOne({
       _id: new ObjectId(id),
-      vendorEmail: email.trim().toLowerCase(),
+      vendorEmail: normalizeEmail(email),
     });
 
     if (!ticket) {
@@ -564,7 +568,7 @@ app.post("/tickets", async (req, res) => {
 
       description: description.trim(),
 
-      vendorEmail: vendorEmail.trim(),
+      vendorEmail: normalizeEmail(vendorEmail),
 
       // Vendor cannot approve their own ticket
       // approved: false,
@@ -578,7 +582,7 @@ app.post("/tickets", async (req, res) => {
       updatedAt: new Date(),
     };
 
-    const normalizedVendorEmail = vendorEmail?.trim();
+    const normalizedVendorEmail = normalizeEmail(vendorEmail);
 
     const vendorUser = await usersCollection.findOne({
       email: normalizedVendorEmail,
@@ -899,7 +903,7 @@ app.get("/bookings/vendor", async (req, res) => {
 
     const bookings = await bookingsCollection
       .find({
-        vendorEmail: email.trim(),
+        vendorEmail: normalizeEmail(email),
       })
       .sort({
         createdAt: -1,
@@ -1096,9 +1100,9 @@ app.post("/bookings", async (req, res) => {
       ticketId: ticket._id,
 
       userName: userName.trim(),
-      userEmail: userEmail.trim(),
+      userEmail: normalizeEmail(userEmail),
 
-      vendorEmail: ticket.vendorEmail,
+      vendorEmail: normalizeEmail(ticket.vendorEmail),
 
       ticketTitle: ticket.title,
       operator: ticket.operator,
@@ -1159,7 +1163,7 @@ app.get("/bookings/user", async (req, res) => {
 
     const bookings = await bookingsCollection
       .find({
-        userEmail: email.trim(),
+        userEmail: normalizeEmail(email),
       })
       .sort({
         createdAt: -1,
