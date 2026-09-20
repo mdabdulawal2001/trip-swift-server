@@ -98,7 +98,16 @@ async function getFraudVendorEmails(usersCollection) {
 }
 
 function normalizeEmail(email) {
-  return String(email || "").trim().toLowerCase();
+  return String(email || "")
+    .trim()
+    .toLowerCase();
+}
+
+function createTransactionId() {
+  return `TXN-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 8)
+    .toUpperCase()}`;
 }
 
 // ROOT ROUTE
@@ -1184,6 +1193,53 @@ app.get("/bookings/user", async (req, res) => {
   }
 });
 
+app.get("/bookings/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { email = "" } = req.query;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid booking ID",
+      });
+    }
+
+    if (!email.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "User email is required",
+      });
+    }
+
+    const { bookingsCollection } = await getCollections();
+
+    const booking = await bookingsCollection.findOne({
+      _id: new ObjectId(id),
+      userEmail: normalizeEmail(email),
+    });
+
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      booking,
+    });
+  } catch (error) {
+    console.error("Get booking by ID error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to get booking",
+    });
+  }
+});
+
 // ============ admin dashboard stats ============
 
 app.get("/admin/dashboard-stats", async (req, res) => {
@@ -1384,6 +1440,522 @@ app.get("/user/dashboard-stats", async (req, res) => {
 
 /* ====================================================================
    ==================================================================== */
+
+// ================ payments routes =================
+app.post("/payments", async (req, res) => {
+  try {
+    const { bookingId, userEmail } = req.body;
+
+    if (!bookingId || !userEmail) {
+      return res.status(400).json({
+        success: false,
+        message: "Booking ID and user email are required",
+      });
+    }
+
+    if (!ObjectId.isValid(bookingId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid booking ID",
+      });
+    }
+
+    const normalizedUserEmail = normalizeEmail(userEmail);
+
+    const { bookingsCollection, ticketsCollection, paymentsCollection } =
+      await getCollections();
+
+    // Find booking
+    const booking = await bookingsCollection.findOne({
+      _id: new ObjectId(bookingId),
+      userEmail: normalizedUserEmail,
+    });
+
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    // Booking must be accepted
+    if (booking.status !== "accepted") {
+      return res.status(400).json({
+        success: false,
+        message: "Only accepted bookings can be paid",
+      });
+    }
+
+    // Already paid
+    if (booking.paymentStatus === "paid") {
+      return res.status(400).json({
+        success: false,
+        message: "This booking has already been paid",
+      });
+    }
+
+    // Find ticket
+    const ticket = await ticketsCollection.findOne({
+      _id: booking.ticketId,
+      status: "approved",
+    });
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found",
+      });
+    }
+
+    // Check ticket expiry
+    const departureTime = new Date(ticket.departureDateTime);
+
+    if (Number.isNaN(departureTime.getTime()) || departureTime <= new Date()) {
+      return res.status(400).json({
+        success: false,
+        message: "This ticket has already expired",
+      });
+    }
+
+    // Check available quantity
+    const bookingQuantity = Number(booking.quantity);
+
+    const currentQuantity = Number(ticket.quantity);
+
+    if (currentQuantity <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Ticket is sold out",
+      });
+    }
+
+    if (bookingQuantity > currentQuantity) {
+      return res.status(400).json({
+        success: false,
+        message: "Not enough tickets are available",
+      });
+    }
+
+    const amount = Number(booking.totalPrice || 0);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payment amount",
+      });
+    }
+
+    const transactionId = `TXN-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 8)
+      .toUpperCase()}`;
+
+    // Reduce ticket quantity
+    const ticketUpdate = await ticketsCollection.updateOne(
+      {
+        _id: booking.ticketId,
+        status: "approved",
+        quantity: {
+          $gte: bookingQuantity,
+        },
+      },
+      {
+        $inc: {
+          quantity: -bookingQuantity,
+        },
+        $set: {
+          updatedAt: new Date(),
+        },
+      },
+    );
+
+    if (ticketUpdate.modifiedCount !== 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Ticket quantity is no longer available",
+      });
+    }
+
+    // Update booking
+    await bookingsCollection.updateOne(
+      {
+        _id: booking._id,
+      },
+      {
+        $set: {
+          paymentStatus: "paid",
+          transactionId,
+          paidAt: new Date(),
+          updatedAt: new Date(),
+        },
+      },
+    );
+
+    // Create transaction
+    const transaction = {
+      transactionId,
+      bookingId: booking._id,
+      ticketId: booking.ticketId,
+
+      userEmail: normalizedUserEmail,
+
+      vendorEmail: normalizeEmail(booking.vendorEmail),
+
+      ticketTitle: booking.ticketTitle,
+
+      amount,
+
+      quantity: bookingQuantity,
+
+      paymentDate: new Date(),
+
+      status: "paid",
+
+      createdAt: new Date(),
+    };
+
+    await paymentsCollection.insertOne(transaction);
+
+    return res.status(201).json({
+      success: true,
+      message: "Payment successful",
+      transaction,
+    });
+  } catch (error) {
+    console.error("POST /payments error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Payment failed",
+    });
+  }
+});
+
+app.post("/payments/confirm", async (req, res) => {
+  const session = client.startSession();
+
+  try {
+    const { bookingId, stripeSessionId, paymentIntentId, amount } = req.body;
+
+    if (!bookingId || !stripeSessionId) {
+      return res.status(400).json({
+        success: false,
+        message: "Booking ID and Stripe session ID are required",
+      });
+    }
+
+    if (!ObjectId.isValid(bookingId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid booking ID",
+      });
+    }
+
+    const numericAmount = Number(amount);
+
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payment amount",
+      });
+    }
+
+    const { bookingsCollection, ticketsCollection, paymentsCollection } =
+      await getCollections();
+
+    let result;
+
+    await session.withTransaction(async () => {
+      // Prevent duplicate processing
+      const existingPayment = await paymentsCollection.findOne(
+        {
+          stripeSessionId,
+        },
+        { session },
+      );
+
+      if (existingPayment) {
+        result = {
+          alreadyProcessed: true,
+          payment: existingPayment,
+        };
+
+        return;
+      }
+
+      const booking = await bookingsCollection.findOne(
+        {
+          _id: new ObjectId(bookingId),
+        },
+        { session },
+      );
+
+      if (!booking) {
+        throw new Error("Booking not found");
+      }
+
+      if (booking.paymentStatus === "paid") {
+        result = {
+          alreadyProcessed: true,
+          payment: null,
+        };
+
+        return;
+      }
+
+      if (booking.status !== "accepted") {
+        throw new Error("Only accepted bookings can be paid");
+      }
+
+      // Make sure the amount matches the booking
+      const bookingTotal = Number(booking.totalPrice);
+
+      if (!Number.isFinite(bookingTotal) || bookingTotal !== numericAmount) {
+        throw new Error("Payment amount does not match booking amount");
+      }
+
+      const bookingQuantity = Number(booking.quantity);
+
+      if (!Number.isInteger(bookingQuantity) || bookingQuantity <= 0) {
+        throw new Error("Invalid booking quantity");
+      }
+
+      const ticketId = booking.ticketId;
+
+      const ticket = await ticketsCollection.findOne(
+        {
+          _id: ticketId instanceof ObjectId ? ticketId : new ObjectId(ticketId),
+        },
+        { session },
+      );
+
+      if (!ticket) {
+        throw new Error("Ticket not found");
+      }
+
+      const availableQuantity = Number(ticket.quantity);
+
+      if (availableQuantity < bookingQuantity) {
+        throw new Error("Not enough tickets are available");
+      }
+
+      // Decrease ticket quantity atomically
+      const ticketUpdate = await ticketsCollection.updateOne(
+        {
+          _id: ticketId instanceof ObjectId ? ticketId : new ObjectId(ticketId),
+
+          quantity: {
+            $gte: bookingQuantity,
+          },
+        },
+        {
+          $inc: {
+            quantity: -bookingQuantity,
+          },
+
+          $set: {
+            updatedAt: new Date(),
+          },
+        },
+        { session },
+      );
+
+      if (ticketUpdate.modifiedCount !== 1) {
+        throw new Error("Ticket quantity could not be updated");
+      }
+
+      const transactionId = createTransactionId();
+
+      const paymentDocument = {
+        transactionId,
+
+        stripeSessionId,
+        paymentIntentId: paymentIntentId || null,
+
+        bookingId: booking._id,
+        ticketId:
+          ticketId instanceof ObjectId ? ticketId : new ObjectId(ticketId),
+
+        userEmail: normalizeEmail(booking.userEmail),
+
+        vendorEmail: normalizeEmail(booking.vendorEmail),
+
+        ticketTitle: booking.ticketTitle,
+
+        amount: bookingTotal,
+
+        quantity: bookingQuantity,
+
+        paymentDate: new Date(),
+
+        status: "paid",
+
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      await paymentsCollection.insertOne(paymentDocument, { session });
+
+      await bookingsCollection.updateOne(
+        {
+          _id: booking._id,
+        },
+        {
+          $set: {
+            paymentStatus: "paid",
+            paymentId: transactionId,
+            stripeSessionId,
+            updatedAt: new Date(),
+          },
+        },
+        { session },
+      );
+
+      result = {
+        alreadyProcessed: false,
+        payment: paymentDocument,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: result?.alreadyProcessed
+        ? "Payment was already processed"
+        : "Payment confirmed successfully",
+
+      alreadyProcessed: result?.alreadyProcessed || false,
+
+      payment: result?.payment || null,
+    });
+  } catch (error) {
+    console.error("Payment confirmation error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to confirm payment",
+    });
+  } finally {
+    await session.endSession();
+  }
+});
+
+// get user payments
+app.get("/payments/user", async (req, res) => {
+  try {
+    const { email = "" } = req.query;
+
+    if (!email.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "User email is required",
+      });
+    }
+
+    const { paymentsCollection } = await getCollections();
+
+    const payments = await paymentsCollection
+      .find({
+        userEmail: normalizeEmail(email),
+      })
+      .sort({
+        paymentDate: -1,
+        _id: -1,
+      })
+      .toArray();
+
+    return res.status(200).json({
+      success: true,
+      payments,
+    });
+  } catch (error) {
+    console.error("GET /payments/user error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch transactions",
+    });
+  }
+});
+
+// vendor revenue api
+app.get("/payments/vendor", async (req, res) => {
+  try {
+    const { email = "" } = req.query;
+
+    if (!email.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Vendor email is required",
+      });
+    }
+
+    const { paymentsCollection } = await getCollections();
+
+    const payments = await paymentsCollection
+      .find({
+        vendorEmail: normalizeEmail(email),
+        status: "paid",
+      })
+      .sort({
+        paymentDate: -1,
+        _id: -1,
+      })
+      .toArray();
+
+    const totalRevenue = payments.reduce(
+      (total, payment) => total + Number(payment.amount || 0),
+      0,
+    );
+
+    return res.status(200).json({
+      success: true,
+      payments,
+      totalRevenue,
+    });
+  } catch (error) {
+    console.error("GET /payments/vendor error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch vendor revenue",
+    });
+  }
+});
+
+// admin revenue api
+app.get("/payments/admin", async (req, res) => {
+  try {
+    const { paymentsCollection } = await getCollections();
+
+    const payments = await paymentsCollection
+      .find({
+        status: "paid",
+      })
+      .sort({
+        paymentDate: -1,
+        _id: -1,
+      })
+      .toArray();
+
+    const totalRevenue = payments.reduce(
+      (total, payment) => total + Number(payment.amount || 0),
+      0,
+    );
+
+    return res.status(200).json({
+      success: true,
+      payments,
+      totalRevenue,
+    });
+  } catch (error) {
+    console.error("GET /payments/admin error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch admin revenue",
+    });
+  }
+});
 
 // 404 ROUTE
 app.use((req, res) => {
