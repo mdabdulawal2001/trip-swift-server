@@ -1768,11 +1768,11 @@ app.post("/payments/confirm", async (req, res) => {
 
       const paymentDocument = {
         transactionId,
-
         stripeSessionId,
         paymentIntentId: paymentIntentId || null,
 
         bookingId: booking._id,
+
         ticketId:
           ticketId instanceof ObjectId ? ticketId : new ObjectId(ticketId),
 
@@ -1782,8 +1782,12 @@ app.post("/payments/confirm", async (req, res) => {
 
         ticketTitle: booking.ticketTitle,
 
-        amount: bookingTotal,
+        from: booking.from,
+        to: booking.to,
+        operator: booking.operator,
+        type: booking.type,
 
+        amount: bookingTotal,
         quantity: bookingQuantity,
 
         paymentDate: new Date(),
@@ -1856,6 +1860,7 @@ app.get("/payments/user", async (req, res) => {
     const payments = await paymentsCollection
       .find({
         userEmail: normalizeEmail(email),
+        status: "paid",
       })
       .sort({
         paymentDate: -1,
@@ -1868,11 +1873,11 @@ app.get("/payments/user", async (req, res) => {
       payments,
     });
   } catch (error) {
-    console.error("GET /payments/user error:", error);
+    console.error("Get user payments error:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch transactions",
+      message: "Failed to fetch user payments",
     });
   }
 });
@@ -1902,22 +1907,16 @@ app.get("/payments/vendor", async (req, res) => {
       })
       .toArray();
 
-    const totalRevenue = payments.reduce(
-      (total, payment) => total + Number(payment.amount || 0),
-      0,
-    );
-
     return res.status(200).json({
       success: true,
       payments,
-      totalRevenue,
     });
   } catch (error) {
-    console.error("GET /payments/vendor error:", error);
+    console.error("Get vendor payments error:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch vendor revenue",
+      message: "Failed to fetch vendor payments",
     });
   }
 });
