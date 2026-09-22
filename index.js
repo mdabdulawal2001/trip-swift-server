@@ -1244,8 +1244,12 @@ app.get("/bookings/:id", async (req, res) => {
 
 app.get("/admin/dashboard-stats", async (req, res) => {
   try {
-    const { ticketsCollection, usersCollection, bookingsCollection } =
-      await getCollections();
+    const {
+      ticketsCollection,
+      usersCollection,
+      bookingsCollection,
+      paymentsCollection,
+    } = await getCollections();
 
     const [
       totalUsers,
@@ -1256,6 +1260,7 @@ app.get("/admin/dashboard-stats", async (req, res) => {
       pendingTickets,
       rejectedTickets,
       totalBookings,
+      revenueResult,
       recentUsers,
       recentTickets,
       recentBookings,
@@ -1288,6 +1293,24 @@ app.get("/admin/dashboard-stats", async (req, res) => {
 
       bookingsCollection.countDocuments({}),
 
+      paymentsCollection
+        .aggregate([
+          {
+            $match: {
+              status: "paid",
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              totalRevenue: {
+                $sum: "$amount",
+              },
+            },
+          },
+        ])
+        .toArray(),
+
       usersCollection
         .find({})
         .sort({
@@ -1315,6 +1338,8 @@ app.get("/admin/dashboard-stats", async (req, res) => {
         .limit(3)
         .toArray(),
     ]);
+
+    const totalRevenue = revenueResult[0]?.totalRevenue || 0;
 
     const ticketTotalForPercentage = totalTickets || 1;
 
@@ -1389,8 +1414,8 @@ app.get("/admin/dashboard-stats", async (req, res) => {
         pendingTickets,
         rejectedTickets,
         totalBookings,
+        totalRevenue,
       },
-
       approvalStats,
 
       activities: activities.slice(0, 3),
