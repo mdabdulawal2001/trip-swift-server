@@ -353,7 +353,7 @@ app.get(
   authorizeRole("vendor"),
   async (req, res) => {
     try {
-      const { ticketsCollection } = await getCollections();
+      const { ticketsCollection, usersCollection } = await getCollections();
 
       const vendorEmail = normalizeEmail(req.user.email);
 
@@ -371,9 +371,15 @@ app.get(
         .sort({ createdAt: -1 })
         .toArray();
 
+        const vendorUser = await usersCollection.findOne({
+        email: vendorEmail,
+      });
+
+
       res.status(200).json({
         success: true,
         tickets,
+        isFraud: vendorUser?.isFraud === true,
       });
     } catch (error) {
       console.error("GET /tickets/vendor error:", error);
