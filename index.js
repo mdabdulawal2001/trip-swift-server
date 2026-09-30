@@ -357,6 +357,7 @@ app.get(
 
       const vendorEmail = normalizeEmail(req.user.email);
 
+      
       if (!vendorEmail) {
         return res.status(400).json({
           success: false,
