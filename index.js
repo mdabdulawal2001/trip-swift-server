@@ -345,7 +345,6 @@ app.get("/tickets", async (req, res) => {
     });
   }
 });
-
 // get vendor tickets route
 app.get(
   "/tickets/vendor",
