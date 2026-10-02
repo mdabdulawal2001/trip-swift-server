@@ -14,15 +14,15 @@ const PAYMENT_CONFIRM_SECRET = process.env.PAYMENT_CONFIRM_SECRET;
 
 // BASIC VALIDATION
 if (!uri) {
-  console.error("❌ MONGODB_URI is missing");
+  console.error("MONGODB_URI is missing");
 }
 
 if (!BETTER_AUTH_URL) {
-  console.error("❌ NEXT_PUBLIC_BETTER_AUTH_URL is missing");
+  console.error("NEXT_PUBLIC_BETTER_AUTH_URL is missing");
 }
 
 if (!PAYMENT_CONFIRM_SECRET) {
-  console.error("❌ PAYMENT_CONFIRM_SECRET is missing");
+  console.error("PAYMENT_CONFIRM_SECRET is missing");
 }
 
 // MIDDLEWARE
@@ -61,12 +61,12 @@ async function connectDB() {
     .connect()
     .then(() => {
       db = client.db("trip-swift-db");
-      console.log("✅ MongoDB connected successfully to trip-swift-db");
+      console.log("MongoDB connected successfully to trip-swift-db");
       return db;
     })
     .catch((error) => {
       dbConnectionPromise = null;
-      console.error("❌ MongoDB connection failed:", error);
+      console.error("MongoDB connection failed:", error);
       throw error;
     });
 
@@ -246,9 +246,8 @@ app.get("/", (req, res) => {
   });
 });
 
-/* ====================================================================
-   =================== WRITE YOUR API ROUTES HERE ===================
-   ==================================================================== */
+  //  ============ API ROUTES ==========
+   
 // Example Route: Get All Tickets
 app.get("/tickets", async (req, res) => {
   try {
@@ -857,9 +856,7 @@ app.patch(
         });
       }
 
-      // --------------------------------------------------
       // Add advertisement
-      // --------------------------------------------------
 
       if (advertised) {
         const advertisedCount = await ticketsCollection.countDocuments({
@@ -867,7 +864,6 @@ app.patch(
         });
 
         // If this ticket is already advertised,
-        // don't block it because of the 6-ticket limit.
         if (!ticket.advertised && advertisedCount >= 6) {
           return res.status(400).json({
             success: false,
@@ -1183,7 +1179,6 @@ app.delete(
 
 // ================== bookings routes ==================
 // bookings route for vendors to get their bookings
-// bookings route for vendors to get their bookings
 app.get(
   "/bookings/vendor",
   verifyToken,
@@ -1353,14 +1348,12 @@ app.patch(
   },
 );
 
-// ============================================================
-// BOOKINGS ROUTES
-// ============================================================
 
-// ============================================================
+// BOOKINGS ROUTES
+
+
 // CREATE BOOKING
 // USER ONLY
-// ============================================================
 
 app.post(
   "/bookings",
@@ -1549,10 +1542,9 @@ app.post(
   },
 );
 
-// ============================================================
+
 // GET USER BOOKINGS
 // USER ONLY
-// ============================================================
 
 app.get(
   "/bookings/user",
@@ -1596,10 +1588,10 @@ app.get(
   },
 );
 
-// ============================================================
+
 // GET SINGLE USER BOOKING
 // USER ONLY
-// ============================================================
+
 
 app.get(
   "/bookings/:id",
@@ -1654,10 +1646,9 @@ app.get(
   },
 );
 
-// ============================================================
 // ADMIN DASHBOARD STATS
 // ADMIN ONLY
-// ============================================================
+
 
 app.get(
   "/admin/dashboard-stats",
@@ -1859,10 +1850,10 @@ app.get(
   },
 );
 
-// ============================================================
+
 // USER DASHBOARD STATS
 // USER ONLY
-// ============================================================
+
 
 app.get(
   "/user/dashboard-stats",
@@ -1906,19 +1897,11 @@ app.get(
   },
 );
 
-// ============================================================
 // PAYMENT ROUTES
-// ============================================================
 
-// ============================================================
 // DIRECT PAYMENT
 // USER ONLY
-//
-// NOTE:
-// Your current Stripe flow uses /payments/confirm.
-// This route is kept so your existing functionality
-// does not break.
-// ============================================================
+
 
 app.post("/payments", verifyToken, authorizeRole("user"), async (req, res) => {
   try {
@@ -2109,15 +2092,11 @@ app.post("/payments", verifyToken, authorizeRole("user"), async (req, res) => {
   }
 });
 
-// ============================================================
+
 // STRIPE PAYMENT CONFIRMATION
-//
-// IMPORTANT:
-// This is NOT a public user route.
-// Next.js /api/verify_payment calls this route.
-//
+
 // It is protected by PAYMENT_CONFIRM_SECRET.
-// ============================================================
+
 
 app.post("/payments/confirm", verifyPaymentConfirmSecret, async (req, res) => {
   const session = client.startSession();
@@ -2154,9 +2133,9 @@ app.post("/payments/confirm", verifyPaymentConfirmSecret, async (req, res) => {
     let result;
 
     await session.withTransaction(async () => {
-      // --------------------------------------------------
+
       // Prevent duplicate processing
-      // --------------------------------------------------
+
 
       const existingPayment = await paymentsCollection.findOne(
         {
@@ -2174,9 +2153,8 @@ app.post("/payments/confirm", verifyPaymentConfirmSecret, async (req, res) => {
         return;
       }
 
-      // --------------------------------------------------
       // Find booking
-      // --------------------------------------------------
+
 
       const booking = await bookingsCollection.findOne(
         {
@@ -2189,9 +2167,8 @@ app.post("/payments/confirm", verifyPaymentConfirmSecret, async (req, res) => {
         throw new Error("Booking not found");
       }
 
-      // --------------------------------------------------
       // Already paid
-      // --------------------------------------------------
+
 
       if (booking.paymentStatus === "paid") {
         result = {
@@ -2202,17 +2179,13 @@ app.post("/payments/confirm", verifyPaymentConfirmSecret, async (req, res) => {
         return;
       }
 
-      // --------------------------------------------------
       // Booking must be accepted
-      // --------------------------------------------------
 
       if (booking.status !== "accepted") {
         throw new Error("Only accepted bookings can be paid");
       }
 
-      // --------------------------------------------------
       // Amount must match booking
-      // --------------------------------------------------
 
       const bookingTotal = Number(booking.totalPrice);
 
@@ -2220,9 +2193,7 @@ app.post("/payments/confirm", verifyPaymentConfirmSecret, async (req, res) => {
         throw new Error("Payment amount does not match booking amount");
       }
 
-      // --------------------------------------------------
       // Validate quantity
-      // --------------------------------------------------
 
       const bookingQuantity = Number(booking.quantity);
 
@@ -2230,9 +2201,7 @@ app.post("/payments/confirm", verifyPaymentConfirmSecret, async (req, res) => {
         throw new Error("Invalid booking quantity");
       }
 
-      // --------------------------------------------------
       // Find ticket
-      // --------------------------------------------------
 
       const ticketId = booking.ticketId;
 
@@ -2251,9 +2220,7 @@ app.post("/payments/confirm", verifyPaymentConfirmSecret, async (req, res) => {
         throw new Error("Ticket not found");
       }
 
-      // --------------------------------------------------
       // Check departure time
-      // --------------------------------------------------
 
       const departureTime = new Date(ticket.departureDateTime);
 
@@ -2264,9 +2231,7 @@ app.post("/payments/confirm", verifyPaymentConfirmSecret, async (req, res) => {
         throw new Error("This ticket has already departed");
       }
 
-      // --------------------------------------------------
       // Check available quantity
-      // --------------------------------------------------
 
       const availableQuantity = Number(ticket.quantity);
 
@@ -2274,9 +2239,7 @@ app.post("/payments/confirm", verifyPaymentConfirmSecret, async (req, res) => {
         throw new Error("Not enough tickets are available");
       }
 
-      // --------------------------------------------------
       // Atomically decrease quantity
-      // --------------------------------------------------
 
       const ticketUpdate = await ticketsCollection.updateOne(
         {
@@ -2302,15 +2265,11 @@ app.post("/payments/confirm", verifyPaymentConfirmSecret, async (req, res) => {
         throw new Error("Ticket quantity could not be updated");
       }
 
-      // --------------------------------------------------
       // Create transaction ID
-      // --------------------------------------------------
 
       const transactionId = createTransactionId();
 
-      // --------------------------------------------------
       // Create payment document
-      // --------------------------------------------------
 
       const paymentDocument = {
         transactionId,
@@ -2352,9 +2311,7 @@ app.post("/payments/confirm", verifyPaymentConfirmSecret, async (req, res) => {
 
       await paymentsCollection.insertOne(paymentDocument, { session });
 
-      // --------------------------------------------------
       // Update booking
-      // --------------------------------------------------
 
       await bookingsCollection.updateOne(
         {
@@ -2404,10 +2361,9 @@ app.post("/payments/confirm", verifyPaymentConfirmSecret, async (req, res) => {
   }
 });
 
-// ============================================================
 // GET USER PAYMENTS
 // USER ONLY
-// ============================================================
+
 
 app.get(
   "/payments/user",
@@ -2452,10 +2408,9 @@ app.get(
   },
 );
 
-// ============================================================
 // GET VENDOR PAYMENTS / REVENUE
 // VENDOR ONLY
-// ============================================================
+
 
 app.get(
   "/payments/vendor",
@@ -2500,10 +2455,8 @@ app.get(
   },
 );
 
-// ============================================================
 // GET ADMIN PAYMENTS / REVENUE
 // ADMIN ONLY
-// ============================================================
 
 app.get(
   "/payments/admin",
@@ -2567,7 +2520,7 @@ app.use((error, req, res, next) => {
 // LISTEN ON PORT (For Local Development)
 if (process.env.NODE_ENV !== "production") {
   app.listen(PORT, () => {
-    console.log(`🚀 Server is running locally on http://localhost:${PORT}`);
+    console.log(`Server is running locally on http://localhost:${PORT}`);
   });
 }
 
