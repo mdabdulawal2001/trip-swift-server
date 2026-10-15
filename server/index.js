@@ -25,6 +25,7 @@ app.use(require("./routes/tickets"));
 app.use(require("./routes/bookings"));
 app.use(require("./routes/dashboard"));
 app.use(require("./routes/payments"));
+app.use(require("./routes/contact"));
 
 app.use((req, res) => {
   res.status(404).json({
@@ -57,3 +58,5 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 module.exports = app;
+
+

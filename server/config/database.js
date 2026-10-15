@@ -51,6 +51,7 @@ async function getCollections() {
     usersCollection: database.collection("user"),
     bookingsCollection: database.collection("bookings"),
     paymentsCollection: database.collection("payments"),
+    contactMessagesCollection: database.collection("contactMessages"),
   };
 }
 
