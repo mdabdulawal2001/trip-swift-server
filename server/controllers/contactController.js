@@ -1,3 +1,4 @@
+const { ObjectId } = require("mongodb");
 const { getCollections } = require("../config/database");
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -45,6 +46,62 @@ const post_contact = async (req, res, next) => {
   }
 };
 
+const get_contact_admin = async (req, res) => {
+  try {
+    const { contactMessagesCollection } = await getCollections();
+    const messages = await contactMessagesCollection
+      .find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    return res.status(200).json({ success: true, messages });
+  } catch (error) {
+    console.error("Failed to fetch contact messages:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch contact messages.",
+    });
+  }
+};
+
+const delete_contact_id = async (req, res) => {
+  const { id } = req.params;
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid contact message ID.",
+    });
+  }
+
+  try {
+    const { contactMessagesCollection } = await getCollections();
+    const result = await contactMessagesCollection.deleteOne({
+      _id: new ObjectId(id),
+    });
+
+    if (result.deletedCount !== 1) {
+      return res.status(404).json({
+        success: false,
+        message: "Contact message not found.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Contact message deleted.",
+    });
+  } catch (error) {
+    console.error("Failed to delete contact message:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete contact message.",
+    });
+  }
+};
+
 module.exports = {
   post_contact,
+  get_contact_admin,
+  delete_contact_id,
 };
