@@ -1,9 +1,40 @@
 const { ObjectId } = require("mongodb");
 const { getCollections, getFraudVendorEmails } = require("../config/database");
-const { normalizeEmail, ensureVendorOwnership } = require("../utils/helpers");
+const { normalizeEmail, ensureVendorOwnership, isPlainObject, isNonEmptyString, isValidDate, isNumericInput, forwardError } = require("../utils/helpers");
 
-const get_tickets = async (req, res) => {
+const normalizeTicketImages = (images, image) => {
+  const additionalImages = Array.isArray(images)
+    ? images
+    : typeof images === "string"
+      ? images.split(/\r?\n/)
+      : [];
+
+  const allImages = [
+    typeof image === "string" ? image : "",
+    ...additionalImages,
+  ]
+    .map((url) => (typeof url === "string" ? url.trim() : ""))
+    .filter(Boolean);
+
+  const validImages = allImages.filter((url) => {
+    try {
+      const parsedUrl = new URL(url);
+      return ["http:", "https:"].includes(parsedUrl.protocol);
+    } catch {
+      return false;
+    }
+  });
+
+  return [...new Set(validImages)];
+};
+
+const get_tickets = async (req, res, next) => {
   try {
+    for (const key of ["from", "to", "type", "sort", "page", "limit"]) {
+      if (req.query[key] !== undefined && typeof req.query[key] !== "string") {
+        return res.status(400).json({ success: false, message: `Invalid ${key} query parameter` });
+      }
+    }
     const { ticketsCollection, usersCollection } = await getCollections();
 
     const fraudVendorEmails = await getFraudVendorEmails(usersCollection);
@@ -89,16 +120,11 @@ const get_tickets = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("GET /tickets error:", error);
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch tickets",
-    });
+    forwardError(next, error, "Failed to fetch tickets");
   }
 };
 
-const get_tickets_vendor = async (req, res) => {
+const get_tickets_vendor = async (req, res, next) => {
     try {
       const { ticketsCollection, usersCollection } = await getCollections();
 
@@ -130,16 +156,11 @@ const get_tickets_vendor = async (req, res) => {
         isFraud: vendorUser?.isFraud === true,
       });
     } catch (error) {
-      console.error("GET /tickets/vendor error:", error);
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to fetch vendor tickets",
-      });
+      forwardError(next, error, "Failed to fetch vendor tickets");
     }
   };
 
-const get_tickets_admin = async (req, res) => {
+const get_tickets_admin = async (req, res, next) => {
     try {
       const { ticketsCollection } = await getCollections();
 
@@ -153,16 +174,11 @@ const get_tickets_admin = async (req, res) => {
         tickets,
       });
     } catch (error) {
-      console.error("GET /tickets/admin error:", error);
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to fetch admin tickets",
-      });
+      forwardError(next, error, "Failed to fetch admin tickets");
     }
   };
 
-const get_tickets_vendor_id = async (req, res) => {
+const get_tickets_vendor_id = async (req, res, next) => {
     try {
       const { ticketsCollection } = await getCollections();
 
@@ -201,16 +217,11 @@ const get_tickets_vendor_id = async (req, res) => {
         ticket,
       });
     } catch (error) {
-      console.error("GET /tickets/vendor/:id error:", error);
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to fetch vendor ticket",
-      });
+      forwardError(next, error, "Failed to fetch vendor ticket");
     }
   };
 
-const get_tickets_admin_id = async (req, res) => {
+const get_tickets_admin_id = async (req, res, next) => {
     try {
       const { ticketsCollection } = await getCollections();
 
@@ -239,16 +250,11 @@ const get_tickets_admin_id = async (req, res) => {
         ticket,
       });
     } catch (error) {
-      console.error("GET /tickets/admin/:id error:", error);
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to fetch ticket",
-      });
+      forwardError(next, error, "Failed to fetch ticket");
     }
   };
 
-const get_tickets_advertised = async (req, res) => {
+const get_tickets_advertised = async (req, res, next) => {
   try {
     const { ticketsCollection, usersCollection } = await getCollections();
 
@@ -273,16 +279,11 @@ const get_tickets_advertised = async (req, res) => {
       tickets,
     });
   } catch (error) {
-    console.error("Get advertised tickets error:", error);
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch advertised tickets",
-    });
+    forwardError(next, error, "Failed to fetch advertised tickets");
   }
 };
 
-const get_tickets_id = async (req, res) => {
+const get_tickets_id = async (req, res, next) => {
   try {
     const { ticketsCollection, usersCollection } = await getCollections();
 
@@ -317,17 +318,15 @@ const get_tickets_id = async (req, res) => {
       ticket,
     });
   } catch (error) {
-    console.error("GET /tickets/:id error:", error);
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch ticket",
-    });
+    forwardError(next, error, "Failed to fetch ticket");
   }
 };
 
-const patch_tickets_id_status = async (req, res) => {
+const patch_tickets_id_status = async (req, res, next) => {
     try {
+      if (!isPlainObject(req.body)) {
+        return res.status(400).json({ success: false, message: "Request body must be a JSON object" });
+      }
       const { ticketsCollection } = await getCollections();
 
       const { id } = req.params;
@@ -384,17 +383,15 @@ const patch_tickets_id_status = async (req, res) => {
         ticket: updatedTicket,
       });
     } catch (error) {
-      console.error("PATCH /tickets/:id/status error:", error);
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to update ticket status",
-      });
+      forwardError(next, error, "Failed to update ticket status");
     }
   };
 
-const post_tickets = async (req, res) => {
+const post_tickets = async (req, res, next) => {
   try {
+    if (!isPlainObject(req.body)) {
+      return res.status(400).json({ success: false, message: "Request body must be a JSON object" });
+    }
     const { ticketsCollection, usersCollection } = await getCollections();
 
     const {
@@ -409,9 +406,26 @@ const post_tickets = async (req, res) => {
       date,
       departureDateTime,
       image,
+      images,
       perks,
       description,
     } = req.body;
+
+    const ticketImages = normalizeTicketImages(images, image);
+
+    if (ticketImages.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one valid ticket image URL is required",
+      });
+    }
+
+    if (ticketImages.length > 4) {
+      return res.status(400).json({
+        success: false,
+        message: "A maximum of 4 ticket images is allowed",
+      });
+    }
 
     if (
       !title ||
@@ -424,12 +438,41 @@ const post_tickets = async (req, res) => {
       !departure ||
       !date ||
       !departureDateTime ||
-      !image ||
       !description
     ) {
       return res.status(400).json({
         success: false,
         message: "Required ticket information is missing",
+      });
+    }
+
+    if (![title, operator, from, to, type, departure, date, description].every(isNonEmptyString) ||
+        !isValidDate(departureDateTime) ||
+        (perks !== undefined && (!Array.isArray(perks) || !perks.every(isNonEmptyString))) ||
+        (images !== undefined && !Array.isArray(images) && typeof images !== "string") ||
+        (Array.isArray(images) && !images.every((url) => typeof url === "string")) ||
+        (image !== undefined && typeof image !== "string")) {
+      return res.status(400).json({ success: false, message: "Invalid ticket information" });
+    }
+
+    if (!isNumericInput(price) || !isNumericInput(quantity)) {
+      return res.status(400).json({ success: false, message: "Invalid ticket price or quantity" });
+    }
+
+    const numericPrice = Number(price);
+    const numericQuantity = Number(quantity);
+
+    if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket price",
+      });
+    }
+
+    if (!Number.isInteger(numericQuantity) || numericQuantity < 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket quantity",
       });
     }
 
@@ -469,14 +512,15 @@ const post_tickets = async (req, res) => {
       to: to.trim(),
       type: type.trim(),
 
-      price: Number(price),
-      quantity: Number(quantity),
+      price: numericPrice,
+      quantity: numericQuantity,
 
       departure: departure.trim(),
       date: date.trim(),
       departureDateTime,
 
-      image: image.trim(),
+      image: ticketImages[0],
+      images: ticketImages,
 
       perks: Array.isArray(perks) ? perks : [],
 
@@ -505,17 +549,15 @@ const post_tickets = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("POST /tickets error:", error);
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to add ticket",
-    });
+    forwardError(next, error, "Failed to add ticket");
   }
 };
 
-const patch_tickets_id_advertise = async (req, res) => {
+const patch_tickets_id_advertise = async (req, res, next) => {
     try {
+      if (!isPlainObject(req.body)) {
+        return res.status(400).json({ success: false, message: "Request body must be a JSON object" });
+      }
       const { id } = req.params;
       const { advertised } = req.body;
 
@@ -621,17 +663,15 @@ const patch_tickets_id_advertise = async (req, res) => {
         ticket: updatedTicket,
       });
     } catch (error) {
-      console.error("PATCH /tickets/:id/advertise error:", error);
-
-      return res.status(500).json({
-        success: false,
-        message: "Failed to update advertisement.",
-      });
+      forwardError(next, error, "Failed to update advertisement.");
     }
   };
 
-const patch_tickets_id = async (req, res) => {
+const patch_tickets_id = async (req, res, next) => {
     try {
+      if (!isPlainObject(req.body)) {
+        return res.status(400).json({ success: false, message: "Request body must be a JSON object" });
+      }
       const { ticketsCollection, usersCollection } =
         await getCollections();
 
@@ -656,9 +696,26 @@ const patch_tickets_id = async (req, res) => {
         date,
         departureDateTime,
         image,
+        images,
         perks,
         description,
       } = req.body;
+
+      const ticketImages = normalizeTicketImages(images, image);
+
+      if (ticketImages.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "At least one valid ticket image URL is required",
+        });
+      }
+
+      if (ticketImages.length > 4) {
+        return res.status(400).json({
+          success: false,
+          message: "A maximum of 4 ticket images is allowed",
+        });
+      }
 
       if (
         !title ||
@@ -671,13 +728,21 @@ const patch_tickets_id = async (req, res) => {
         !departure ||
         !date ||
         !departureDateTime ||
-        !image ||
         !description
       ) {
         return res.status(400).json({
           success: false,
           message: "Required ticket information is missing",
         });
+      }
+
+      if (![title, operator, from, to, type, departure, date, description].every(isNonEmptyString) ||
+          !isValidDate(departureDateTime) ||
+          (perks !== undefined && (!Array.isArray(perks) || !perks.every(isNonEmptyString))) ||
+          (images !== undefined && !Array.isArray(images) && typeof images !== "string") ||
+          (Array.isArray(images) && !images.every((url) => typeof url === "string")) ||
+          (image !== undefined && typeof image !== "string")) {
+        return res.status(400).json({ success: false, message: "Invalid ticket information" });
       }
 
       // Find existing ticket first
@@ -720,6 +785,10 @@ const patch_tickets_id = async (req, res) => {
         });
       }
 
+      if (!isNumericInput(price) || !isNumericInput(quantity)) {
+        return res.status(400).json({ success: false, message: "Invalid ticket price or quantity" });
+      }
+
       const numericPrice = Number(price);
       const numericQuantity = Number(quantity);
 
@@ -754,7 +823,8 @@ const patch_tickets_id = async (req, res) => {
         departure: departure.trim(),
         date: date.trim(),
         departureDateTime,
-        image: image.trim(),
+        image: ticketImages[0],
+        images: ticketImages,
         perks: Array.isArray(perks) ? perks : [],
         description: description.trim(),
 
@@ -794,16 +864,11 @@ const patch_tickets_id = async (req, res) => {
         ticket: updatedTicket,
       });
     } catch (error) {
-      console.error("PATCH /tickets/:id error:", error);
-
-      return res.status(500).json({
-        success: false,
-        message: "Failed to update ticket",
-      });
+      forwardError(next, error, "Failed to update ticket");
     }
   };
 
-const delete_tickets_id = async (req, res) => {
+const delete_tickets_id = async (req, res, next) => {
     try {
       const { ticketsCollection, usersCollection } =
         await getCollections();
@@ -868,12 +933,7 @@ const delete_tickets_id = async (req, res) => {
         message: "Ticket deleted successfully",
       });
     } catch (error) {
-      console.error("DELETE /tickets/:id error:", error);
-
-      return res.status(500).json({
-        success: false,
-        message: "Failed to delete ticket",
-      });
+      forwardError(next, error, "Failed to delete ticket");
     }
   };
 

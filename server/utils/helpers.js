@@ -4,6 +4,31 @@ function normalizeEmail(email) {
     .toLowerCase();
 }
 
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isNonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isValidDate(value) {
+  return (typeof value === "string" || value instanceof Date) &&
+    !Number.isNaN(new Date(value).getTime());
+}
+
+function isNumericInput(value) {
+  return (typeof value === "number" && Number.isFinite(value)) ||
+    (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value)));
+}
+
+function forwardError(next, error, publicMessage, status) {
+  const forwarded = error instanceof Error ? error : new Error(String(error || "Unknown server error"));
+  forwarded.publicMessage = publicMessage;
+  if (status) forwarded.status = status;
+  return next(forwarded);
+}
+
 function isSameUserEmail(firstEmail, secondEmail) {
   return normalizeEmail(firstEmail) === normalizeEmail(secondEmail);
 }
@@ -30,6 +55,11 @@ function createTransactionId() {
 
 module.exports = {
   normalizeEmail,
+  isPlainObject,
+  isNonEmptyString,
+  isValidDate,
+  isNumericInput,
+  forwardError,
   isSameUserEmail,
   ensureVendorOwnership,
   createTransactionId,

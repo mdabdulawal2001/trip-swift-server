@@ -1,7 +1,7 @@
 const { getCollections } = require("../config/database");
-const { normalizeEmail } = require("../utils/helpers");
+const { normalizeEmail, forwardError } = require("../utils/helpers");
 
-const get_admin_dashboard_stats = async (req, res) => {
+const get_admin_dashboard_stats = async (req, res, next) => {
     try {
       const {
         ticketsCollection,
@@ -187,16 +187,11 @@ const get_admin_dashboard_stats = async (req, res) => {
         activities: activities.slice(0, 3),
       });
     } catch (error) {
-      console.error("GET /admin/dashboard-stats error:", error);
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to fetch admin dashboard stats",
-      });
+      forwardError(next, error, "Failed to fetch admin dashboard stats");
     }
   };
 
-const get_user_dashboard_stats = async (req, res) => {
+const get_user_dashboard_stats = async (req, res, next) => {
     try {
       const userEmail = normalizeEmail(req.user?.email);
 
@@ -224,12 +219,7 @@ const get_user_dashboard_stats = async (req, res) => {
         bookings: userBookings,
       });
     } catch (error) {
-      console.error("GET /user/dashboard-stats error:", error);
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to fetch user dashboard stats",
-      });
+      forwardError(next, error, "Failed to fetch user dashboard stats");
     }
   };
 

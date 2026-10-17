@@ -5,10 +5,27 @@ const cors = require("cors");
 
 const app = express();
 const PORT = process.env.PORT || 8000;
+const allowedOrigins = [
+  ...("http://localhost:3000,http://localhost:5173").split(","),
+  ...(process.env.NEXT_PUBLIC_BETTER_AUTH_URL ? [process.env.NEXT_PUBLIC_BETTER_AUTH_URL] : []),
+].map((origin) => {
+    try {
+      return new URL(origin.trim()).origin;
+    } catch {
+      return null;
+    }
+  })
+  .filter(Boolean);
 
 app.use(
   cors({
-    origin: true,
+    origin(origin, callback) {
+      // Requests without an Origin header (for example server-to-server calls) remain allowed.
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(null, false);
+    },
     credentials: true,
   }),
 );
@@ -46,8 +63,8 @@ app.use((error, req, res, next) => {
 
   res.status(status).json({
     success: false,
-    message: status >= 500 ? "Internal server error" : error.message,
-    error: error.message,
+    message: error.publicMessage || (status >= 500 ? "Internal server error" : error.message),
+    ...(!error.publicMessage ? { error: error.message } : {}),
   });
 });
 

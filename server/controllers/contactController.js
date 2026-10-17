@@ -1,5 +1,6 @@
 const { ObjectId } = require("mongodb");
 const { getCollections } = require("../config/database");
+const { forwardError } = require("../utils/helpers");
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -42,11 +43,11 @@ const post_contact = async (req, res, next) => {
       message: "Your message has been saved.",
     });
   } catch (error) {
-    return next(error);
+    return forwardError(next, error, "Failed to save contact message.");
   }
 };
 
-const get_contact_admin = async (req, res) => {
+const get_contact_admin = async (req, res, next) => {
   try {
     const { contactMessagesCollection } = await getCollections();
     const messages = await contactMessagesCollection
@@ -56,15 +57,11 @@ const get_contact_admin = async (req, res) => {
 
     return res.status(200).json({ success: true, messages });
   } catch (error) {
-    console.error("Failed to fetch contact messages:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch contact messages.",
-    });
+    return forwardError(next, error, "Failed to fetch contact messages.");
   }
 };
 
-const delete_contact_id = async (req, res) => {
+const delete_contact_id = async (req, res, next) => {
   const { id } = req.params;
 
   if (!ObjectId.isValid(id)) {
@@ -92,11 +89,7 @@ const delete_contact_id = async (req, res) => {
       message: "Contact message deleted.",
     });
   } catch (error) {
-    console.error("Failed to delete contact message:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to delete contact message.",
-    });
+    return forwardError(next, error, "Failed to delete contact message.");
   }
 };
 

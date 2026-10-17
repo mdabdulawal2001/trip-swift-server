@@ -1,9 +1,12 @@
 const { ObjectId } = require("mongodb");
 const { client, getCollections } = require("../config/database");
-const { normalizeEmail, createTransactionId } = require("../utils/helpers");
+const { normalizeEmail, createTransactionId, isPlainObject, isNonEmptyString, isNumericInput, forwardError } = require("../utils/helpers");
 
-const post_payments = async (req, res) => {
+const post_payments = async (req, res, next) => {
   try {
+    if (!isPlainObject(req.body)) {
+      return res.status(400).json({ success: false, message: "Request body must be a JSON object" });
+    }
     const { bookingId, userEmail } = req.body;
 
     if (!bookingId || !userEmail) {
@@ -11,6 +14,10 @@ const post_payments = async (req, res) => {
         success: false,
         message: "Booking ID and user email are required",
       });
+    }
+
+    if (!isNonEmptyString(bookingId) || !isNonEmptyString(userEmail)) {
+      return res.status(400).json({ success: false, message: "Invalid booking ID or user email" });
     }
 
     if (!ObjectId.isValid(bookingId)) {
@@ -182,19 +189,17 @@ const post_payments = async (req, res) => {
       transaction,
     });
   } catch (error) {
-    console.error("POST /payments error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Payment failed",
-    });
+    forwardError(next, error, "Payment failed");
   }
 };
 
-const post_payments_confirm = async (req, res) => {
+const post_payments_confirm = async (req, res, next) => {
   const session = client.startSession();
 
   try {
+    if (!isPlainObject(req.body)) {
+      return res.status(400).json({ success: false, message: "Request body must be a JSON object" });
+    }
     const { bookingId, stripeSessionId, paymentIntentId, amount } = req.body;
 
     if (!bookingId || !stripeSessionId) {
@@ -204,11 +209,20 @@ const post_payments_confirm = async (req, res) => {
       });
     }
 
+    if (!isNonEmptyString(bookingId) || !isNonEmptyString(stripeSessionId) ||
+        (paymentIntentId !== undefined && paymentIntentId !== null && !isNonEmptyString(paymentIntentId))) {
+      return res.status(400).json({ success: false, message: "Invalid payment confirmation details" });
+    }
+
     if (!ObjectId.isValid(bookingId)) {
       return res.status(400).json({
         success: false,
         message: "Invalid booking ID",
       });
+    }
+
+    if (!isNumericInput(amount)) {
+      return res.status(400).json({ success: false, message: "Invalid payment amount" });
     }
 
     const numericAmount = Number(amount);
@@ -443,18 +457,24 @@ const post_payments_confirm = async (req, res) => {
       payment: result?.payment || null,
     });
   } catch (error) {
-    console.error("Payment confirmation error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: error?.message || "Failed to confirm payment",
-    });
+    const message = error?.message || "Failed to confirm payment";
+    const notFound = message === "Booking not found" || message === "Ticket not found";
+    const expectedInputErrors = new Set([
+      "Only accepted bookings can be paid",
+      "Payment amount does not match booking amount",
+      "Invalid booking quantity",
+      "This ticket has already departed",
+      "Not enough tickets are available",
+      "Ticket quantity could not be updated",
+    ]);
+    const status = notFound ? 404 : expectedInputErrors.has(message) ? 400 : 500;
+    forwardError(next, error, message, status);
   } finally {
     await session.endSession();
   }
 };
 
-const get_payments_user = async (req, res) => {
+const get_payments_user = async (req, res, next) => {
     try {
       const userEmail = normalizeEmail(req.user?.email);
 
@@ -483,16 +503,11 @@ const get_payments_user = async (req, res) => {
         payments,
       });
     } catch (error) {
-      console.error("Get user payments error:", error);
-
-      return res.status(500).json({
-        success: false,
-        message: "Failed to fetch user payments",
-      });
+      forwardError(next, error, "Failed to fetch user payments");
     }
   };
 
-const get_payments_vendor = async (req, res) => {
+const get_payments_vendor = async (req, res, next) => {
     try {
       const vendorEmail = normalizeEmail(req.user?.email);
 
@@ -521,16 +536,11 @@ const get_payments_vendor = async (req, res) => {
         payments,
       });
     } catch (error) {
-      console.error("Get vendor payments error:", error);
-
-      return res.status(500).json({
-        success: false,
-        message: "Failed to fetch vendor payments",
-      });
+      forwardError(next, error, "Failed to fetch vendor payments");
     }
   };
 
-const get_payments_admin = async (req, res) => {
+const get_payments_admin = async (req, res, next) => {
     try {
       const { paymentsCollection } = await getCollections();
 
@@ -555,12 +565,7 @@ const get_payments_admin = async (req, res) => {
         totalRevenue,
       });
     } catch (error) {
-      console.error("GET /payments/admin error:", error);
-
-      return res.status(500).json({
-        success: false,
-        message: "Failed to fetch admin revenue",
-      });
+      forwardError(next, error, "Failed to fetch admin revenue");
     }
   };
 

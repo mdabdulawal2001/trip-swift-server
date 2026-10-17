@@ -1,8 +1,8 @@
 const { ObjectId } = require("mongodb");
 const { getCollections } = require("../config/database");
-const { normalizeEmail, ensureVendorOwnership } = require("../utils/helpers");
+const { normalizeEmail, ensureVendorOwnership, isPlainObject, isNonEmptyString, isNumericInput, forwardError } = require("../utils/helpers");
 
-const get_bookings_vendor = async (req, res) => {
+const get_bookings_vendor = async (req, res, next) => {
     try {
       const vendorEmail = normalizeEmail(
         req.user?.email,
@@ -32,17 +32,15 @@ const get_bookings_vendor = async (req, res) => {
         bookings,
       });
     } catch (error) {
-      console.error("GET /bookings/vendor error:", error);
-
-      return res.status(500).json({
-        success: false,
-        message: "Failed to fetch vendor bookings",
-      });
+      forwardError(next, error, "Failed to fetch vendor bookings");
     }
   };
 
-const patch_bookings_id_status = async (req, res) => {
+const patch_bookings_id_status = async (req, res, next) => {
     try {
+      if (!isPlainObject(req.body)) {
+        return res.status(400).json({ success: false, message: "Request body must be a JSON object" });
+      }
       const { id } = req.params;
       const { status } = req.body;
 
@@ -148,20 +146,15 @@ const patch_bookings_id_status = async (req, res) => {
         booking: updatedBooking,
       });
     } catch (error) {
-      console.error(
-        "PATCH /bookings/:id/status error:",
-        error,
-      );
-
-      return res.status(500).json({
-        success: false,
-        message: "Failed to update booking status",
-      });
+      forwardError(next, error, "Failed to update booking status");
     }
   };
 
-const post_bookings = async (req, res) => {
+const post_bookings = async (req, res, next) => {
     try {
+      if (!isPlainObject(req.body)) {
+        return res.status(400).json({ success: false, message: "Request body must be a JSON object" });
+      }
       const {
         ticketId,
         userName,
@@ -179,11 +172,19 @@ const post_bookings = async (req, res) => {
         });
       }
 
+      if (!isNonEmptyString(userName)) {
+        return res.status(400).json({ success: false, message: "Invalid booking user name" });
+      }
+
       if (!ObjectId.isValid(ticketId)) {
         return res.status(400).json({
           success: false,
           message: "Invalid ticket ID",
         });
+      }
+
+      if (!isNumericInput(quantity)) {
+        return res.status(400).json({ success: false, message: "Invalid booking quantity" });
       }
 
       const bookingQuantity = Number(quantity);
@@ -330,19 +331,11 @@ const post_bookings = async (req, res) => {
         },
       });
     } catch (error) {
-      console.error(
-        "POST /bookings error:",
-        error,
-      );
-
-      return res.status(500).json({
-        success: false,
-        message: "Failed to create booking",
-      });
+      forwardError(next, error, "Failed to create booking");
     }
   };
 
-const get_bookings_user = async (req, res) => {
+const get_bookings_user = async (req, res, next) => {
     try {
       const userEmail = normalizeEmail(req.user?.email);
 
@@ -370,16 +363,11 @@ const get_bookings_user = async (req, res) => {
         bookings,
       });
     } catch (error) {
-      console.error("GET /bookings/user error:", error);
-
-      res.status(500).json({
-        success: false,
-        message: "Failed to fetch user bookings",
-      });
+      forwardError(next, error, "Failed to fetch user bookings");
     }
   };
 
-const get_bookings_id = async (req, res) => {
+const get_bookings_id = async (req, res, next) => {
     try {
       const { id } = req.params;
 
@@ -418,12 +406,7 @@ const get_bookings_id = async (req, res) => {
         booking,
       });
     } catch (error) {
-      console.error("GET /bookings/:id error:", error);
-
-      return res.status(500).json({
-        success: false,
-        message: "Failed to get booking",
-      });
+      forwardError(next, error, "Failed to get booking");
     }
   };
 
