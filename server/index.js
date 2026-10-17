@@ -5,17 +5,9 @@ const cors = require("cors");
 
 const app = express();
 const PORT = process.env.PORT || 8000;
-const allowedOrigins = [
-  ...("http://localhost:3000,http://localhost:5173").split(","),
-  ...(process.env.NEXT_PUBLIC_BETTER_AUTH_URL ? [process.env.NEXT_PUBLIC_BETTER_AUTH_URL] : []),
-].map((origin) => {
-    try {
-      return new URL(origin.trim()).origin;
-    } catch {
-      return null;
-    }
-  })
-  .filter(Boolean);
+const allowedOrigins = process.env.NEXT_PUBLIC_BETTER_AUTH_URL
+  ? [new URL(process.env.NEXT_PUBLIC_BETTER_AUTH_URL).origin]
+  : [];
 
 app.use(
   cors({
